@@ -1,0 +1,2220 @@
+---
+title: "Sentiment Analysis with Reviews Web Scraped"
+author: "Janis Corona"
+date: "3/30/2020"
+output: html_document
+---
+
+
+This is a web scraped social media review site of two chriopractic clinics offering massage, one low priced grocery store, and one high end massage retreat.The names of the doctors have been replaced with 'DOCTOR', and name of chiropracic facility to CHIROPRACTIC. The names of the high end massage retreat have been replaced with 'HIGH END SPA'. The name of the low cost grocery store was replaced with 'LOW COST GROCERY STORE.'
+
+This data table originally had 1338 observations, but that was an error due to copy and paste in Excel, so there is a need to remove empty rows after reading in the data if your copy of RStudio reads in those empty rows. After reading in the data there will be 516 reviews of mixed ratings for these business models. There aren't many reviews lower than four stars for the chiropractic clinics, but there is a lot of variation in the high end massage retreat and low cost grocery store reviews. These businesses are in the Corona area and the first to be listed when typing massage, except for the grocery store, because it was directly typed in. Note that the social media site will send your api information on your demographics to these businesses when extracting the data, so you should have an alias. 
+```{r}
+library(DT)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(tm)
+library(SnowballC)
+library(wordcloud)
+library(ggplot2)
+library(textstem)
+library(stringr)
+library(visNetwork)
+library(igraph)
+
+```
+
+```{r}
+reviews <- read.csv('ReviewsMassageChiropractorYelp_withCompanyNamesOmitted.csv',
+                    sep=',',header=TRUE, na.strings=c('',' ','NA','NULL'))
+```
+
+Clean up this data of NA rows and empty fields if you have more than 516 observations. You should have five columns.
+```{r}
+Reviews <- reviews[complete.cases(reviews),]
+```
+
+
+```{r}
+colnames(Reviews)
+```
+
+You can download this data to follow along with this DT datatable.
+```{r}
+Reviews_DT <- datatable(data=Reviews, rownames=FALSE,  
+                      extensions=c('Buttons','Responsive'),
+                      filter=list(position='top'),
+                      options=list( dom='Bfrtip',scrollX = TRUE, scrollY=TRUE,
+                        buttons=c('colvis','csv'),
+                        language=list(sSearch='Filter:')
+                        )
+                      )
+Reviews_DT
+```
+
+The rating has more than one rating, separated by a comma for those reviews that are updated and the other reviews displayed have different ratings. We will see this after running the next chunk. The first listed value is the rating for the latest review, and the subsequent ratings (1-5) are for the next subsequent reviews backtracking in time. Each review will have a date listed before each previous review that the later review updated.
+```{r}
+unique(Reviews$rating_last_first_if_multipleUpdated)
+```
+
+You can see from the above there are various review values, and we could choose to keep these or make separate dummy fields for how many time the review was updated from last to first review. The most updates appears to be five times, so we could create dummy fields to capture that rating and if it is the first,second,..., or fifth review and rating for each reviewer. Why not lets just do this. And so the next chunk will add those dummy fields.
+```{r}
+rating <- strsplit(as.character(paste(Reviews$rating_last_first_if_multipleUpdated)), split=',')
+
+Reviews$mostRecentVisit_rating <- as.character(paste(lapply(rating,'[',1)))
+Reviews$lastVisit_rating <- as.character(paste(lapply(rating,'[',2)))
+Reviews$twoVisitsPrior_rating <- as.character(paste(lapply(rating,'[',3)))
+Reviews$threeVisitsPrior_rating <- as.character(paste(lapply(rating,'[',4)))
+Reviews$fourVisitsPrior_rating <- as.character(paste(lapply(rating,'[',5)))
+
+Reviews1 <- Reviews[with(Reviews, order(fourVisitsPrior_rating,
+                                        threeVisitsPrior_rating,
+                                        twoVisitsPrior_rating,
+                                        lastVisit_rating, decreasing=FALSE)),]
+
+head(Reviews1)
+```
+
+The order by decreasing=FALSE had to be used to see those sequential visits from last visit, because these fields are character fields. When using predictive analytics they can be changed to factor, or we can change them to numeric.
+```{r}
+Reviews1$mostRecentVisit_rating <- as.numeric(paste(Reviews1$mostRecentVisit_rating))
+Reviews1$lastVisit_rating <- as.numeric(paste(Reviews1$lastVisit_rating))
+Reviews1$twoVisitsPrior_rating <- as.numeric(paste(Reviews1$twoVisitsPrior_rating))
+Reviews1$threeVisitsPrior_rating <- as.numeric(paste(Reviews1$threeVisitsPrior_rating))
+Reviews1$fourVisitsPrior_rating <- as.numeric(paste(Reviews1$fourVisitsPrior_rating))
+str(Reviews1)
+```
+
+Now our 'NA' filled dummy columns are recognized as actual missing values or NAs of numeric instead of character fields. It is easier to turn the character fields into numeric, then factors so I changed them into numeric. If we want to use them as factors, which they are, when running the models we can. But we are going to focus on extracting hidden features from the data first and cleaning up redundancies in the data from the web scraping extenstions. Like the header user information and the extra dates, or the actual dates, and the 'updated' header to every previous review update. Lets look at our table of Reviews right now, but using the DT package for the datatable function.
+```{r}
+Reviews_DT1 <- datatable(data=Reviews1, rownames=FALSE, # width = 800, height = 700,
+                      extensions=c('Buttons','Responsive'),#'FixedColumns'),
+                      #filter=list(position='top'),
+                      options=list(pageLength=1,
+                        dom='Bfrtip',scrollX = TRUE,# scrollY=TRUE,fixedColumns = TRUE,
+                        buttons=c('colvis','csv'),
+                        language=list(sSearch='Filter:')
+                        )
+                      )
+                  
+Reviews_DT1
+```
+
+We should also look at the table within Rmarkdown, because DT is fussy and takes a while to load, plus the amount of text in the first column takes up the rest of the rows.
+
+```{r}
+row.names(Reviews1) <- NULL
+head(Reviews1)
+```
+Reviews1 data table is ordered by the review with the most previous reviews in most to least. We see from this first observation in the table and many others that the reviews have a header that needs cleaning up. So, lets do that. We will use gsub to remove these headers with some regex commands.
+There are a lot of non character elements in the reviews that are considered white space characters for (\t)tabs, (\n)newlines or a mac newline(\r) or (\s)space. If any mistakes it'll be easy to adjust instead of rerunning codes to get the Reviews1 table.
+```{r}
+Reviews2 <- Reviews1 
+
+Reviews2$review <- gsub('[P].*[.][\\t][\\n]','',perl=TRUE,Reviews2$review)
+head(Reviews2)
+```
+
+We see that the Photo... header was removed if the review included a header. That placemarker is removed. But lets also remove the observations that didn't have a photo placemarker and with these observations remove anything between the header and the first listed date that is preceeded by two newlines and one tab.We will also extract the first name and the header of the observations we removed the photo placemarker from up to the first date listed.
+```{r}
+Reviews2$review <- gsub('^[\\t][\\n]', '',  perl=TRUE, Reviews2$review)
+
+head(Reviews2)
+
+```
+
+I noticed there is a user name that begins with a single apostrophe, and it throws off this script if not fixed early, because later these names will be put into the userName field.So we have to add in the escape character backslash and apostrophe with a pipe for 'or' into this next command.
+```{r}
+Reviews2$review <- gsub('^[a-zA-Z|\'].*[.]','', perl=TRUE, Reviews2$review)
+head(Reviews2)
+```
+
+We see that we have the city, state, number of friends, reviews, photos, and a status if they have more than a certain number of reviews. But also that this information could be useful, so we might want to split these string reviews by the 9 newline characters.
+```{r}
+reviewStringSplit <- strsplit(Reviews2$review, split='[\n]{9}',perl=TRUE)
+head(reviewStringSplit)
+```
+***
+This is great, because now we can separate the review with the header information. Lets name one string the headerData and the other the userObservation.
+```{r}
+headerData <- lapply(reviewStringSplit, '[',1)
+head(headerData)
+```
+
+***
+We see the city, state, number of friends, the number of reviews, number of photos, and if elite separated by a newline. Lets remove the newline, then add all these separately to our table by feature identified accordingly.
+```{r}
+headerData2 <- as.character(headerData)
+headerData2 <- gsub('^[\n]','', headerData2, perl=TRUE)
+headermetaSplit <- strsplit(headerData2,split='[\n]',perl=TRUE)
+head(headermetaSplit)
+```
+```{r}
+Reviews2$cityState <- lapply(headermetaSplit,'[',1)
+Reviews2$friends <- lapply(headermetaSplit,'[',2)
+Reviews2$reviews <- lapply(headermetaSplit,'[',3)
+Reviews2$photos <- lapply(headermetaSplit,'[',4)
+Reviews2$eliteStatus <- lapply(headermetaSplit,'[',5)
+
+```
+
+
+```{r}
+userObservation <- lapply(reviewStringSplit,'[',2)
+head(userObservation,3)
+```
+***
+We can see from the second split of the string that the userObservation includes more meta data that includes the user name, date, if it was an updated review, and if available the number of check ins to the business and number of photos. The first name is the first part of this string. Lets split the string and make a field called userName to add to our table. We have to split by one newline and one tab, because one of the dates only has a prepend of one newline and one tab, although most are two newlines followed by a tab, we miss a review if we don't.
+```{r}
+obsStrSplit <- as.character(userObservation)
+obsStrSplit2 <- strsplit(obsStrSplit,split='[\n][\t]', perl=TRUE)
+Reviews2$userName <- lapply(obsStrSplit2,'[',1)
+Reviews2$userName <- gsub('[\n][\n]','',perl=TRUE, Reviews2$userName)
+Reviews2$userName <- gsub('^[ ]','',perl=TRUE, Reviews2$userName)
+Reviews2$userName <- gsub('[\n]$','',perl=TRUE, Reviews2$userName)
+head(Reviews2$userName)
+```
+
+Lets now replace the review field that has been slightly adjusted to exclude the first header. There is still the user name header that occurs right before the data and if the review is updated.This is the obsStrSplit2 list.
+```{r}
+head(obsStrSplit2)
+```
+***
+
+These top reviews are the ones that have more than one review ordered from most to least by rating when this analysis and data cleaning began. We see from our obsStrSplit2 object that there are at most 5 listed reviews that were separated by the double newline and tab that preceeds each date. So we can make dummy fields for these reviews as well by the listed item they correspond to for each user. Later we can gather those fields into one Review field by review by visit. In each of those fields we will take out the response by the business if there was one. They are shown above and start with a double newline and the words, 'Business Customer Service.' We'll mark this so we know to search for this fix later. %^& its tagged.
+So, lets add in the latest review, previous review, 2nd previous review, 3rd previous review, and 4th previous review because the most reviews for this data is five.
+```{r}
+Reviews2$mostRecentVisit_review <- as.character(paste(lapply(obsStrSplit2,'[',2)))
+Reviews2$lastVisit_review <- as.character(paste(lapply(obsStrSplit2,'[',3)))
+Reviews2$twoVisitsPrior_review <- as.character(paste(lapply(obsStrSplit2,'[',4)))
+Reviews2$threeVisitsPrior_review <- as.character(paste(lapply(obsStrSplit2,'[',5)))
+Reviews2$fourVisitsPrior_review <- as.character(paste(lapply(obsStrSplit2,'[',5)))
+```
+
+lets remove the first review field from our table using the dplyr package select function. We should also change these added list types so that they are character strings.
+```{r}
+Reviews3 <- Reviews2 %>% select(-review)
+Reviews3$cityState <- as.factor(paste(Reviews3$cityState))
+Reviews3$friends <- gsub(' friends','',Reviews3$friends)
+Reviews3$friends <- as.numeric(paste(Reviews3$friends))
+Reviews3$reviews <- gsub(' reviews','', Reviews3$reviews)
+Reviews3$reviews <- as.numeric(paste(Reviews3$reviews))
+Reviews3$photos <- gsub(' photos','', Reviews3$photos)
+Reviews3$photos <- as.numeric(paste(Reviews3$photos))
+Reviews3$eliteStatus <- as.factor(paste(Reviews3$eliteStatus))
+Reviews3$mostRecentVisit_review <- as.character(Reviews3$mostRecentVisit_review)
+Reviews3$lastVisit_review <- as.character(Reviews3$lastVisit_review)
+Reviews3$twoVisitsPrior_review <- as.character(Reviews3$twoVisitsPrior_review)
+Reviews3$threeVisitsPrior_review <- as.character(Reviews3$threeVisitsPrior_review)
+Reviews3$fourVisitsPrior_review <- as.character(Reviews3$fourVisitsPrior_review)
+str(Reviews3)
+```
+
+Lets rearrange the columns in our new table. We still need to extract from each of the five reviews by user (if exist) the business response (also if exists).
+```{r}
+colnames(Reviews3)
+```
+
+First lets gather the review fields and the ratings fields and remove the NA values from the userReveiwSeries and userRatingSeries.
+```{r}
+Reviews4 <- gather(Reviews3, 'userReviewSeries','userReviewContent',16:20)
+Reviews4$userReviewContent <- gsub('NA','', Reviews4$userReviewContent)
+
+#remove the char NAs because complete.cases won't work unless the table is read in with
+# the correct NA values, even after converting to empty in the table.
+write.csv(Reviews4, 'reviews4.csv', row.names=FALSE)
+Reviews4 <- read.csv('reviews4.csv', sep=',', header=TRUE, na.strings=c('',' ','NA',NULL))
+
+#now the table is 543 instead of 2580 observations.
+Reviews4 <- Reviews4[complete.cases(Reviews4$userReviewContent),]
+
+Reviews5 <- gather(Reviews4, 'userRatingSeries','userRatingValue',5:9)
+#because this userRatingValue field is numeric, the NAs are already read by R as such
+#we can remove the NAs with complete.cases to get a 614 obs table instead of 2715
+Reviews5 <- Reviews5[complete.cases(Reviews5$userRatingValue),]
+
+colnames(Reviews5)
+
+```
+
+
+```{r}
+Reviews6 <- Reviews5 %>% select(userReviewSeries, userReviewContent,
+                                userRatingSeries, userRatingValue,
+                                everything())
+Reviews7 <- Reviews6 %>% select(-rating_last_first_if_multipleUpdated,
+                                -site)
+```
+
+
+
+```{r}
+head(Reviews7)
+```
+
+Lets now remove the business response from the review content field.
+```{r}
+businessReplied <- grep('Comment from',Reviews7$userReviewContent)
+Reviews7$businessReplied <- 'no'
+Reviews7$businessReplied[businessReplied] <- 'yes'
+
+Reviews8 <- Reviews7 %>% select(userReviewSeries:userRatingValue,businessReplied,
+                                everything())
+Reviews9 <- Reviews8[order(Reviews8$businessReplied, decreasing=TRUE),]
+row.names(Reviews9) <- NULL
+```
+
+Lets make this field a new field of the public relations reply removed.
+```{r}
+Reviews9$userReviewContent <- as.character(paste(Reviews9$userReviewContent))
+Reviews9$userRatingSeries <- as.factor(paste(Reviews9$userRatingSeries))
+Reviews9$businessReplied <- as.factor(Reviews9$businessReplied)
+
+PR <- strsplit(Reviews9$userReviewContent, split='[C][o][m][m][e][n][t] [f][r][o][m]',
+               perl=TRUE)
+head(PR)
+```
+
+Lets separate these into two separate character strings of user only review and PR_reply
+```{r}
+userOnlyReview <- as.character(paste(lapply(PR,'[',1)))
+PR_reply <- as.character(paste(lapply(PR,'[',2)))
+```
+
+Both of the above vectors are the same number of observations as our table. 
+
+Lets remove the other data on photos
+```{r}
+userOnlyReview <- gsub('[\n][P][h][o][t][o] [o][f].*','', userOnlyReview,perl=TRUE)
+grep('Comment', userOnlyReview)
+```
+There shouldn't be any comments from business owners in this first part of the string.
+
+```{r}
+head(userOnlyReview,6)
+```
+
+***
+Also, the above shows the beginning is a date with a dropped zero for the months 1-9, and some observations have the photo[s] or check-in[s]. This should be modified with regex to add a date column and also add the numeric values for the photos or check-ins to those fields in our table.
+
+
+Lets add these two strings of user only and PR reply to the data as two separate fields with ifelse functions.
+```{r}
+Reviews9$userReviewOnlyContent <- userOnlyReview
+
+Reviews9$businessReplyContent <- PR_reply
+
+Reviews9$userReviewOnlyContent <- gsub('[\n][P][h][o][t][o] [o][f].*','', 
+                                   Reviews9$userReviewOnlyContent,perl=TRUE)
+Reviews9$userReviewOnlyContent <- gsub('[S][e][e] [a][l][l] [p].*','',
+                                       Reviews9$userReviewOnlyContent,
+                                   perl=TRUE)
+head(Reviews9[,13:15])
+```
+
+We just mentioned the date beginning each userReviewOnlyContent and userReviewContent columns, so lets create a date column for these dates. There are actually a bunch of anomolies in that first part of the string.
+```{r}
+Reviews9$Date <- substr(Reviews9$userReviewOnlyContent,1,11)
+date <- strsplit(Reviews9$Date, split='[a-zA-Z]', perl=TRUE)
+Date <- as.character(paste(lapply(date,'[',1)))
+Date <- trimws(Date, which='right',whitespace='[\n]')
+Date <- gsub('[ ][\n][0-9]','', perl=TRUE, Date)
+Date <- gsub('[\n][ ][0-9]','', perl=TRUE, Date)
+Date <- gsub('[\n][ ]','', perl=TRUE, Date)
+Date <- gsub('[\n][\" ][0-9]','', perl=TRUE, Date)
+Date <- gsub('[\n][0-9]{2}','', perl=TRUE, Date)
+Date <- gsub('[\n][\\]["]','', perl=TRUE, Date)
+Date <- gsub('[\n][0-9]','', perl=TRUE,Date)
+
+Date1 <- mdy(Date)
+
+Reviews9$Date <-Date1
+
+```
+
+Remove the first date string in the userReviewOnlyContent.
+```{r}
+Reviews9$userReviewOnlyContent <- gsub('[0-9]{1,2}[/][0-9]{1,2}[/][0-9]{4}','',
+                                       perl=TRUE, Reviews9$userReviewOnlyContent)
+```
+
+Lets also remove any photo meta from the original userReviewContent column.
+```{r}
+Reviews9$userReviewContent <- gsub('[S][e][e] [a][l][l] [p].*','',Reviews9$userReviewContent,
+                                   perl=TRUE)
+Reviews9$userReviewContent <- gsub('[\n][P][h][o][t][o] [o][f].*','',
+                                   Reviews9$userReviewContent,perl=TRUE)
+```
+
+Now lets rearrange our columns and make this a searchable and downloadable datatable.
+```{r}
+Reviews10 <- Reviews9 %>% select(userReviewSeries, userReviewOnlyContent,
+                                 userRatingSeries, userRatingValue, businessReplied,                                                businessReplyContent, everything())
+colnames(Reviews10)
+```
+
+The userReviewContent has the text of both business response and the user as well as photo placemarker data.
+```{r}
+Reviews10_DT <- datatable(data=Reviews10, rownames=FALSE, # width = 800, height = 700,
+                      extensions=c('Buttons','Responsive'),#'FixedColumns'),
+                      #filter=list(position='top'),
+                      options=list(pageLength=1,
+                        dom='Bfrtip',scrollX = TRUE,# scrollY=TRUE,fixedColumns = TRUE,
+                        buttons=c('colvis','csv'),
+                        language=list(sSearch='Filter:')
+                        )
+                      )
+Reviews10_DT
+```
+
+
+```{r}
+head(Reviews10)
+```
+
+The userReviewContent was kept in the table to compare the cleaned up columns on user reviews.
+
+We should still remove the updated and previous review descriptions.
+```{r}
+Reviews10$userReviewOnlyContent <- gsub('[uU][p][d][a][t][e][d].*[\n]','', perl=TRUE,
+                                        Reviews10$userReviewOnlyContent)
+Reviews10$userReviewOnlyContent <- gsub('[pP][r][e][v][i][o][u].*[w]','', perl=TRUE,
+                                        Reviews10$userReviewOnlyContent)
+Reviews10$id <- row.names(Reviews10)
+
+pix <- grep('photo+',Reviews10$userReviewOnlyContent)
+pix2 <- Reviews10$userReviewOnlyContent[pix]
+pix3 <- trimws(pix2, which="left",whitespace="[\t\r\n]")
+pixs <- as.data.frame(pix3)
+colnames(pixs) <- 'busPhotos'
+pixs$id <- pix
+pixs$busPhotos <- gsub('^[ ]','', pixs$busPhotos)
+pixs2 <- pixs[grep('^[0-9][ ][pP]',pixs$busPhotos, perl=TRUE),]
+head(pixs2)
+```
+
+```{r}
+pics <- strsplit(pixs2$busPhotos,split='[\n\n]',perl=TRUE)
+head(pics,2)
+```
+
+From the above, we our only interested in the first split of photos, the other reviews are split on the double newline and caused multiple splits for most single reviews.
+```{r}
+pixs2$userBusinessPhotos <- as.character(paste(lapply(pics,'[',1)))
+pixs2$userBusinessPhotos <- gsub(' photo','', pixs2$userBusinessPhotos)
+pixs2$userBusinessPhotos <- gsub('s','',pixs2$userBusinessPhotos)
+pixs2$userBusinessPhotos <- trimws(pixs2$userBusinessPhotos,which='right')
+pixs2$userBusinessPhotos <- as.numeric(paste(pixs2$userBusinessPhotos))
+head(pixs2)
+```
+
+Lets keep only the id and userBusinessPhotos columns.
+```{r}
+pics3 <- pixs2 %>% select(id,userBusinessPhotos)
+```
+
+Combine this new feature to the data table of all features thus far.
+```{r}
+Reviews11 <- merge(Reviews10, pics3, by.x='id', by.y='id', all.x=TRUE)
+```
+
+Now lets do the same thing for the check-ins information. The number of times the user checked in or visited the business. Get only those reviews
+with the check-ins a header and not in the observation or found at the end of the observation.
+```{r}
+checks <- Reviews11 %>% select(id,userReviewOnlyContent) 
+  
+checks$substring <- substr(checks$userReviewOnlyContent, 1,40) 
+  
+chekn <- grep('check-in',checks$substring)
+checks1 <- checks[chekn,]
+```
+There are more check-ins than photos by the user. 
+```{r}
+chekn <- checks1 %>% select(id, substring)
+head(chekn,10)
+```
+
+Lets remove the reference to photos and double newline characters from our substring.
+```{r}
+chekn$substring <- gsub('[0-9] [p][h][o][t][o][\n][\n]','', chekn$substring,perl=TRUE)
+chekn$substring <- gsub('[0-9][0-9] [p][h][o][t][o][s][\n][\n]','', chekn$substring,perl=TRUE)
+chekn$substring <- gsub('[0-9] [p][h][o][t][o][s][\n][\n]','', chekn$substring,perl=TRUE)
+
+```
+
+Split on the double newline characters and grab the first entries, after verifying the substring column only starts with the number of check-ins per user.
+```{r}
+checkN <- strsplit(chekn$substring, split='[\n][\n]',perl=TRUE)
+head(checkN)
+```
+
+```{r}
+checkN2 <- as.character(paste(lapply(checkN,'[',1)))
+checkN2 <- trimws(checkN2, which='left', whitespace="[\n]")
+checkN2 <- gsub('^ ','',checkN2)
+checkN2 <- gsub('^ ','',checkN2)
+checkN2 <- gsub(' check-ins','',checkN2)
+checkN2 <- gsub(' check-in','',checkN2)
+checkN2 <- as.numeric(paste(checkN2))
+
+head(checkN2)
+```
+
+```{r}
+chekn$userCheckIns <- checkN2
+head(chekn)
+```
+
+merge this with Reviews11 data.
+```{r}
+Reviews12 <- merge(Reviews11, chekn, by.x='id', by.y='id', all.x=TRUE)
+head(Reviews12[order(Reviews12$userCheckIns,decreasing=TRUE),c(17,19:20)])
+```
+
+```{r}
+Reviews13 <- Reviews12 %>% select(-id, -substring)
+head(Reviews13[order(Reviews13$userCheckIns,decreasing=TRUE),c(16,18)])
+```
+
+Lets remove the header from the userReviewOnlyContent column now that we have extracted the photos and check-in data per user.
+```{r}
+subUser <- substr(Reviews13$userReviewOnlyContent,1,30)
+head(subUser,30)
+
+```
+
+```{r}
+subUser2 <- gsub('[0-9]{1,2}.*[\n][\n]','', subUser, perl=TRUE)
+head(subUser2,30)
+
+```
+
+```{r}
+subUser3 <- gsub('[\n][ ][0-9]{1,2}.*[\n][\n]','',subUser2, perl=TRUE)
+head(subUser3,50)
+```
+
+Now that we tested the removal using regex on a string, we can apply these regex commands to the column userReviewOnlyContent.
+```{r}
+Reviews13$userReviewOnlyContent <- gsub('[0-9]{1,2}.*[\n][\n]','',
+                                        Reviews13$userReviewOnlyContent, perl=TRUE)
+
+Reviews13$userReviewOnlyContent <- gsub('[\n][ ][0-9]{1,2}.*[\n][\n]','',
+                                        Reviews13$userReviewOnlyContent, perl=TRUE)
+Reviews13$userReviewOnlyContent <- trimws(Reviews13$userReviewOnlyContent, which='left',
+                                          whitespace="[\n\t\r]")
+head(Reviews13,30)
+```
+Now it looks like we have our cleaned data to run sentiment and text analysis of in determining the rating the user review is given by the user. Lets write this file out to csv, and make a DT datatable for downloading from Rpubs.
+```{r}
+write.csv(Reviews13, 'cleanedRegexReviews13.csv',row.names=FALSE)
+```
+
+
+```{r}
+Reviews13_DT <- datatable(data=Reviews13, rownames=FALSE,  #width = 800, height = 700,
+                      extensions=c('Buttons','Responsive'),#,'FixedColumns'),
+                      filter=list(position='top'),
+                      options=list(pageLength=2,
+                        dom='Bfrtip',scrollX = TRUE, scrollY=TRUE,#fixedColumns = TRUE,
+                        buttons=c('colvis','csv'),
+                        language=list(sSearch='Filter:')
+                        )
+                      )
+Reviews13_DT
+```
+
+Lets keep only the cleaned user review and the rating for that user's visit.
+```{r}
+Reviews14 <- Reviews13 %>% select(userReviewOnlyContent,userRatingValue)
+row.names(Reviews14) <- NULL
+head(Reviews14)
+```
+
+We will have to create a corpus of documents for each rating, then we can clean up the text with the programs within these text mining libraries other than what we have done to the data already. We should also remove the words: 'DOCTOR', 'CHIROPRACTIC,'HIGH END SPA', and 'LOW COST GROCERY STORE.'
+```{r}
+Reviews14$userReviewOnlyContent <- gsub('DOCTOR','', Reviews14$userReviewOnlyContent)
+Reviews14$userReviewOnlyContent <- gsub('CHIROPRACTIC','', Reviews14$userReviewOnlyContent)
+Reviews14$userReviewOnlyContent <- gsub('HIGH END SPA','', Reviews14$userReviewOnlyContent)
+Reviews14$userReviewOnlyContent <- gsub('LOW COST GROCERY STORE','',
+                                        Reviews14$userReviewOnlyContent)
+
+```
+
+Lets lemmatize the document first to grab the root word and not the stem of each review.
+```{r}
+lemma <- lemmatize_strings(Reviews14$userReviewOnlyContent, dictionary=lexicon::hash_lemmas)
+
+Lemma <- as.data.frame(lemma)
+Lemma <- cbind(Lemma, Reviews14)
+
+colnames(Lemma) <- c('lemmatizedReview','review', 'rating')
+Lemma$rating <- as.factor(paste(Lemma$rating))
+head(Lemma)
+```
+
+From this table, we are going to subset the reviews by rating by the user of 1 through 5.
+```{r}
+rating1 <- subset(Lemma, Lemma$rating==1)
+rating2 <- subset(Lemma, Lemma$rating==2)
+rating3 <- subset(Lemma, Lemma$rating==3)
+rating4 <- subset(Lemma, Lemma$rating==4)
+rating5 <- subset(Lemma, Lemma$rating==5)
+
+```
+
+Lets create a directory for each rating.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+dir.create('./rating1')
+dir.create('./rating2')
+dir.create('./rating3')
+dir.create('./rating4')
+dir.create('./rating5')
+
+r1 <- as.character(rating1$lemmatizedReview)
+setwd('./rating1')
+
+for (j in 1:length(r1)){
+  write(r1[j], paste(paste('rating1',j, sep='.'), '.txt', sep=''))
+}
+setwd('../')
+
+r2 <- as.character(rating2$lemmatizedReview)
+setwd('./rating2')
+
+for (j in 1:length(r2)){
+  write(r2[j], paste(paste('rating2',j, sep='.'), '.txt', sep=''))
+}
+setwd('../')
+
+
+r3 <- as.character(rating3$lemmatizedReview)
+setwd('./rating3')
+
+for (j in 1:length(r3)){
+  write(r3[j], paste(paste('rating3',j, sep='.'), '.txt', sep=''))
+}
+setwd('../')
+
+r4 <- as.character(rating4$lemmatizedReview)
+setwd('./rating4')
+
+for (j in 1:length(r4)){
+  write(r4[j], paste(paste('rating4',j, sep='.'), '.txt', sep=''))
+}
+setwd('../')
+
+
+r5 <- as.character(rating5$lemmatizedReview)
+setwd('./rating5')
+
+for (j in 1:length(r5)){
+  write(r5[j], paste(paste('rating5',j, sep='.'), '.txt', sep=''))
+}
+setwd('../')
+
+```
+
+List the files in each folder rating 1-5.
+```{r}
+list.files('./rating1')
+```
+
+
+
+```{r}
+list.files('./rating2')
+```
+
+```{r}
+list.files('./rating3')
+
+```
+
+```{r}
+list.files('./rating4')
+
+```
+
+```{r}
+list.files('./rating5')
+
+```
+
+
+```{r}
+R1 <- Corpus(DirSource("rating1"))
+
+
+R1
+
+R1 <- tm_map(R1, removePunctuation)
+R1 <- tm_map(R1, removeNumbers)
+#R1 <- tm_map(R1, tolower) # I want to capture the emotion the users write with when All caps
+#R1 <- tm_map(R1, removeWords, stopwords("english"))#Also the number of 'and's' and 'not' etc
+R1 <- tm_map(R1, stripWhitespace)
+#+R1 <- tm_map(R1, stemDocument)#we already lemmatized the document it is more robust to meaning
+
+dtmR1 <- DocumentTermMatrix(R1)
+```
+
+```{r}
+freq <- colSums(as.matrix(dtmR1))
+wordcloud(names(freq), freq, min.freq=30,colors=brewer.pal(3,'Dark2'))
+
+```
+
+```{r}
+freqR1 <- as.data.frame(colSums(as.matrix(dtmR1)))
+colnames(freqR1) <- 'rating1'
+freqR1$id <- row.names(freqR1)
+FREQ_R1 <- freqR1[order(freqR1$rating1,decreasing=TRUE),]
+row.names(FREQ_R1) <- NULL
+head(FREQ_R1,50)
+```
+
+People in general, speaking as American born and raised, when angry usually speak out of anger and disappointment when feeling they have been had, taken, or in some way been victimized for not getting what they paid for when promised or convinced into getting that experience, purchase, feeling, etc. As you can see by not excluding the stop words we now have a count of the number of connections to persuade the reader that he or she was wronged or rewarded by the number of interjections. We learn this early in persuasive writing in grammar school to have at least five paragraphs to build a persuasive story with an introduction, three body paragraphs, and a conclusion, and again in English composition in lower level undergrad work. This means build on three points or perspectives in the body paragraphs to persuade the reader your right, and find them if they aren't readily considered.
+
+Lets do the same for the other four folders in getting our ordered word counts or frequencies.
+```{r}
+R2 <- Corpus(DirSource("rating2"))
+
+
+R2
+
+R2 <- tm_map(R2, removePunctuation)
+R2 <- tm_map(R2, removeNumbers)
+R2 <- tm_map(R2, stripWhitespace)
+
+dtmR2 <- DocumentTermMatrix(R2)
+
+freq2 <- colSums(as.matrix(dtmR2))
+wordcloud(names(freq2), freq2, min.freq=25,colors=brewer.pal(3,'Dark2'))
+```
+
+```{r}
+freqR2 <- as.data.frame(colSums(as.matrix(dtmR2)))
+colnames(freqR2) <- 'rating2'
+freqR2$id <- row.names(freqR2)
+FREQ_R2 <- freqR2[order(freqR2$rating2,decreasing=TRUE),]
+row.names(FREQ_R2) <- NULL
+head(FREQ_R2,50)
+```
+
+```{r}
+R3 <- Corpus(DirSource("rating3"))
+
+
+R3
+
+R3 <- tm_map(R3, removePunctuation)
+R3 <- tm_map(R3, removeNumbers)
+R3 <- tm_map(R3, stripWhitespace)
+
+dtmR3 <- DocumentTermMatrix(R3)
+
+freq3 <- colSums(as.matrix(dtmR3))
+wordcloud(names(freq3), freq3, min.freq=25,colors=brewer.pal(3,'Dark2'))
+```
+
+```{r}
+freqR3 <- as.data.frame(colSums(as.matrix(dtmR3)))
+colnames(freqR3) <- 'rating3'
+freqR3$id <- row.names(freqR3)
+FREQ_R3 <- freqR3[order(freqR3$rating3,decreasing=TRUE),]
+row.names(FREQ_R3) <- NULL
+head(FREQ_R3,50)
+```
+
+```{r}
+R4 <- Corpus(DirSource("rating4"))
+
+
+R4
+
+R4 <- tm_map(R4, removePunctuation)
+R4 <- tm_map(R4, removeNumbers)
+R4 <- tm_map(R4, stripWhitespace)
+
+dtmR4 <- DocumentTermMatrix(R4)
+
+freq4 <- colSums(as.matrix(dtmR4))
+wordcloud(names(freq4), freq4, min.freq=25,colors=brewer.pal(3,'Dark2'))
+```
+
+```{r}
+freqR4 <- as.data.frame(colSums(as.matrix(dtmR4)))
+colnames(freqR4) <- 'rating4'
+freqR4$id <- row.names(freqR4)
+FREQ_R4 <- freqR4[order(freqR4$rating4,decreasing=TRUE),]
+row.names(FREQ_R4) <- NULL
+head(FREQ_R4,50)
+```
+
+```{r}
+R5 <- Corpus(DirSource("rating5"))
+
+
+R5
+
+R5 <- tm_map(R5, removePunctuation)
+R5 <- tm_map(R5, removeNumbers)
+R5 <- tm_map(R5, stripWhitespace)
+
+dtmR5 <- DocumentTermMatrix(R5)
+
+freq5 <- colSums(as.matrix(dtmR5))
+
+wordcloud(names(freq5), freq5, min.freq=75,colors=brewer.pal(3,'Dark2'))
+```
+
+```{r}
+freqR5 <- as.data.frame(colSums(as.matrix(dtmR5)))
+colnames(freqR5) <- 'rating5'
+freqR5$id <- row.names(freqR5)
+FREQ_R5 <- freqR5[order(freqR5$rating5,decreasing=TRUE),]
+row.names(FREQ_R5) <- NULL
+head(FREQ_R5,50)
+```
+
+Lets add a feature for the ratio of word frequencies to the number of documents in the reviews with each rating 1-5.
+```{r}
+l1 <- length(list.files('./rating1'))
+l2 <- length(list.files('./rating2'))
+l3 <- length(list.files('./rating3'))
+l4 <- length(list.files('./rating4'))
+l5 <- length(list.files('./rating5'))
+
+FREQ_R1$termTotalFilesRatio <-FREQ_R1$rating1/l1
+FREQ_R2$termTotalFilesRatio <- FREQ_R2$rating2/l2
+FREQ_R3$termTotalFilesRatio <- FREQ_R3$rating3/l3
+FREQ_R4$termTotalFilesRatio <- FREQ_R4$rating4/l4
+FREQ_R5$termTotalFilesRatio <- FREQ_R5$rating5/l5
+
+FREQ_R1$termTotalTermsRatio <-FREQ_R1$rating1/length(FREQ_R1$id)
+FREQ_R2$termTotalTermsRatio <- FREQ_R2$rating2/length(FREQ_R2$id)
+FREQ_R3$termTotalTermsRatio <- FREQ_R3$rating3/length(FREQ_R3$id)
+FREQ_R4$termTotalTermsRatio <- FREQ_R4$rating4/length(FREQ_R4$id)
+FREQ_R5$termTotalTermsRatio <- FREQ_R5$rating5/length(FREQ_R5$id)
+
+```
+
+Lets change the column names of each rating table.
+```{r}
+colnames(FREQ_R1) <-c('Rating1termfrequency',
+                      'term',
+                      'Rating1_termTotalFilesRatio',
+                      'Rating1_termTotalTermsRatio')
+colnames(FREQ_R2) <-c('Rating2termfrequency',
+                      'term',
+                      'Rating2_termTotalFilesRatio',
+                      'Rating2_termTotalTermsRatio')
+colnames(FREQ_R3) <-c('Rating3termfrequency',
+                      'term',
+                      'Rating3_termTotalFilesRatio',
+                      'Rating3_termTotalTermsRatio')
+colnames(FREQ_R4) <-c('Rating4termfrequency',
+                      'term',
+                      'Rating4_termTotalFilesRatio',
+                      'Rating4_termTotalTermsRatio')
+colnames(FREQ_R5) <-c('Rating5termfrequency',
+                      'term',
+                      'Rating5_termTotalFilesRatio',
+                      'Rating5_termTotalTermsRatio')
+
+```
+
+Lets now combine all these term frequencies.
+```{r}
+m1 <- merge(FREQ_R1,FREQ_R2, by.x='term', by.y='term', all=TRUE)
+m2 <- merge(m1,FREQ_R3, by.x='term', by.y='term', all=TRUE)
+m3 <- merge(m2,FREQ_R4, by.x='term', by.y='term', all=TRUE)
+m4 <- merge(m3,FREQ_R5, by.x='term', by.y='term', all=TRUE)
+
+allTerms <- m4 %>% select(term,Rating1termfrequency,Rating2termfrequency,
+                          Rating3termfrequency,Rating4termfrequency,
+                          Rating5termfrequency,Rating1_termTotalFilesRatio,
+                          Rating2_termTotalFilesRatio,Rating3_termTotalFilesRatio,
+                          Rating4_termTotalFilesRatio,Rating5_termTotalFilesRatio,
+                          everything())
+colnames(allTerms)
+```
+
+
+Lets add a median field for the word in each rating to this table.
+```{r}
+allTerms$MedianCount <- apply(allTerms[2:6],1,median, na.rm=TRUE)
+
+medianRating1 <- apply(allTerms[2],2,median,na.rm=TRUE)
+medianRating2 <- apply(allTerms[3],2,median,na.rm=TRUE)
+medianRating3 <- apply(allTerms[4],2,median,na.rm=TRUE)
+medianRating4 <- apply(allTerms[5],2,median,na.rm=TRUE)
+medianRating5 <- apply(allTerms[6],2,median,na.rm=TRUE)
+
+meanRating1 <- floor(apply(allTerms[2],2,mean,na.rm=TRUE))
+meanRating2 <- floor(apply(allTerms[3],2,mean,na.rm=TRUE))
+meanRating3 <- floor(apply(allTerms[4],2,mean,na.rm=TRUE))
+meanRating4 <- floor(apply(allTerms[5],2,mean,na.rm=TRUE))
+meanRating5 <- floor(apply(allTerms[6],2,mean,na.rm=TRUE))
+
+allTerms2 <- allTerms[order(allTerms$MedianCount,decreasing=TRUE),]
+```
+
+Lets add a bottom and top percentile to this table based on the terms in each rating subset.
+```{r}
+allTerms2$Quantile5_R1 <- ifelse(allTerms2$Rating1termfrequency <=       
+                                quantile(allTerms2$Rating1termfrequency, .05,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile95_R1 <- ifelse(allTerms2$Rating1termfrequency >=       
+                                quantile(allTerms2$Rating1termfrequency, .95,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile5_R2 <- ifelse(allTerms2$Rating2termfrequency <=       
+                                quantile(allTerms2$Rating2termfrequency, .05,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile95_R2 <- ifelse(allTerms2$Rating2termfrequency >=       
+                                quantile(allTerms2$Rating2termfrequency, .95,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile5_R3 <- ifelse(allTerms2$Rating3termfrequency <=       
+                                quantile(allTerms2$Rating3termfrequency, .05,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile95_R3 <- ifelse(allTerms2$Rating3termfrequency >=       
+                                quantile(allTerms2$Rating3termfrequency, .95,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile5_R4 <- ifelse(allTerms2$Rating4termfrequency <=       
+                                quantile(allTerms2$Rating4termfrequency, .05,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile95_R4 <- ifelse(allTerms2$Rating4termfrequency >=       
+                                quantile(allTerms2$Rating4termfrequency, .95,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile5_R5 <- ifelse(allTerms2$Rating5termfrequency <=       
+                                quantile(allTerms2$Rating5termfrequency, .05,na.rm=TRUE),
+                              1,0)
+allTerms2$Quantile95_R5 <- ifelse(allTerms2$Rating5termfrequency >=       
+                                quantile(allTerms2$Rating5termfrequency, .95,na.rm=TRUE),
+                              1,0)
+
+```
+
+We have to keep this data wide, but it is useful to filter by, and extracting those words more used in each rating for each review. 
+```{r}
+goodGreat <- subset(allTerms2, allTerms2$Quantile95_R5==1 &
+                      allTerms2$Quantile95_R4==1 & 
+                      allTerms2$Rating5termfrequency > allTerms2$MedianCount &
+                      allTerms2$Rating4termfrequency > allTerms2$MedianCount |
+                      allTerms2$Quantile5_R5==1 &
+                      allTerms2$Quantile5_R4==1 |
+                      allTerms2$Rating5termfrequency > meanRating5 |
+                      allTerms2$Rating4termfrequency > meanRating4
+                  )
+average <- subset(allTerms2, allTerms2$Quantile95_R3==1 &
+                      allTerms2$Quantile95_R2==1 & 
+                      allTerms2$Rating3termfrequency > allTerms2$MedianCount &
+                      allTerms2$Rating2termfrequency > allTerms2$MedianCount |
+                      allTerms2$Quantile5_R3==1 &
+                      allTerms2$Quantile5_R2==1  |
+                      allTerms2$Rating3termfrequency > meanRating3 |
+                      allTerms2$Rating2termfrequency > meanRating2
+                 )
+poor <- subset(allTerms2, allTerms2$Quantile95_R1==1 &
+                      allTerms2$Quantile95_R2==1 & 
+                      allTerms2$Rating1termfrequency > allTerms2$MedianCount &
+                      allTerms2$Rating2termfrequency > allTerms2$MedianCount |
+                      allTerms2$Quantile5_R1==1 &
+                      allTerms2$Quantile5_R2==1 |
+                      allTerms2$Rating1termfrequency > meanRating1 |
+                      allTerms2$Rating2termfrequency > meanRating2
+                 )
+```
+
+Here is bar chart of the word counts for the poor ratings.
+```{r}
+wf <- data.frame(word=poor$term, freq=poor$Rating1termfrequency)
+p <- ggplot(subset(wf, freq>60), aes(word, freq))
+p <- p + geom_bar(stat= 'identity') 
+p <- p + theme(axis.text.x=element_text(angle=90, hjust=1)) 
+p
+```
+
+
+Lets make a word cloud of each of these data tables terms by weights of the lowest for poor, highest for average, and highest for goodGreat
+The NAs have to be removed before using word cloud.
+```{r}
+poorNA <- poor[complete.cases(poor$Rating1termfrequency),]
+
+Poor1 <- as.data.frame(t(poorNA$Rating1termfrequency))
+colnames(Poor1) <- poorNA$term
+
+Poor1 <- Poor1 %>% select(-and,-the)
+
+freqPoor <- colSums(as.matrix(Poor1))
+```
+
+```{r}
+wordcloud(names(freqPoor), freqPoor, min.freq=20,
+          colors=brewer.pal(6,'Dark2'))
+
+```
+
+```{r}
+wordcloud(names(freqPoor), freqPoor, min.freq=25,colors=brewer.pal(3,'Dark2'))
+
+```
+
+
+Here is bar chart of the word counts for the average ratings.
+```{r}
+wf <- data.frame(word=average$term, freq=average$Rating3termfrequency)
+p <- ggplot(subset(wf, freq>25), aes(word, freq))
+p <- p + geom_bar(stat= 'identity') 
+p <- p + theme(axis.text.x=element_text(angle=90, hjust=1)) 
+p
+```
+
+
+Lets make a word cloud.
+```{r}
+avgNA <- average[complete.cases(average$Rating3termfrequency),]
+
+Avg1 <- as.data.frame(t(avgNA$Rating3termfrequency))
+colnames(Avg1) <- avgNA$term
+Avg1 <- Avg1 %>% select(-and,-the)
+freqAvg <- colSums(as.matrix(Avg1))
+```
+
+```{r}
+wordcloud(names(freqAvg), freqAvg, min.freq=20,
+          colors=brewer.pal(6,'Dark2'))
+
+```
+
+```{r}
+wordcloud(names(freqAvg), freqAvg, min.freq=25,colors=brewer.pal(3,'Dark2'))
+
+```
+
+
+Here is bar chart of the word counts for the good or great ratings.
+```{r}
+wf <- data.frame(word=goodGreat$term, freq=goodGreat$Rating5termfrequency)
+p <- ggplot(subset(wf, freq>70), aes(word, freq))
+p <- p + geom_bar(stat= 'identity') 
+p <- p + theme(axis.text.x=element_text(angle=90, hjust=1)) 
+p
+```
+
+
+Lets make a word cloud.
+```{r}
+grtNA <- goodGreat[complete.cases(goodGreat$Rating5termfrequency),]
+
+Grt1 <- as.data.frame(t(grtNA$Rating5termfrequency))
+colnames(Grt1) <- grtNA$term
+Grt1 <- Grt1[,-c(1:4)] #remove the first 4 words, (the,and,for,have)
+
+freqGrt <- colSums(as.matrix(Grt1))
+```
+
+```{r}
+wordcloud(names(freqGrt), freqGrt, min.freq=80,
+          colors=brewer.pal(6,'Dark2'))
+
+```
+
+```{r}
+wordcloud(names(freqGrt), freqGrt, min.freq=95,colors=brewer.pal(3,'Dark2'))
+
+```
+
+
+***
+
+That was a great way to look at the word clouds of these ratings and the words in each set of words in the top and bottom 5th percentiles as well as higher than the median or mean values.
+The last couple of word plots I removed the interjection words at the top of the list. Otherwise, you would have seen and,the,for, and have. But the for is a keyword and the data table had to be sliced instead of deselecting those words.
+
+
+***
+***
+***
+
+We still haven't done predictive analytics to predict the rating by the review. We will do that next. I would also like to create a visNetwork of these words, with the ratings, and the business type these words are associated with.
+
+The way that sentiment analysis works is to build the document term matrix (dtm) of counts based on the reveiws, and use those counts of words and given ratings to determine the best fit from any particular algorithm that can predict a review as being a specific rating. We have the dtms of all five of our ratings. But we don't have anything set up manually to count all those words from every review or at least any keywords to build those models in predicting our reviews. Normally, you have each row in a dtm is a review, and the columns are each specific word, and evertime that word is found, the word will be added to its last count to get a final count of each word per document. We could do something like this based on our key words. 
+
+We could also quickly jump over to python and wait a bit in running the datatable we cleaned up into a bunch of algorithms like random forest, decision trees, generalized linear models, boosted trees, naive bayes, etc. Or we could look up the text mining and natural language processing packages in the libraries we attached to this document or add to as needed. 
+
+Since this document has been manual from the beginning by cleaning up and extracting features from the reviews. We could just use those features, instead of the words, or we could pick a handful of words, even stopwords, that our program will count in each review, and use as features to predict the reviews with what we already know how to do from previous work in github and rpubs.
+
+Lets look again at the features we do have from our big cleaned up table.
+```{r}
+colnames(Reviews13)
+```
+
+Our target variable would be the 4th column feature above called userRatingValue. We can keep every feature column except the 7th for userReveiwContent that is not our cleaned up review feature and Date. Although, we could get the day of the date feature, because that might have a value added benefit to predicting the rating from these reviews. We also don't need the business Reply Content and won't need the user reviews cleaned up as a predictor once we extract the keyword counts we want. We will just use the words we saw from our word clouds above for a poor, average, or great review subsets. Lets keep the top 10 from each, including the stopwords. 
+
+The poor ratings keywords are for ratings of 1 or 2.
+```{r}
+KW_poor <- poor %>% select(term,Rating1termfrequency,Rating2termfrequency)
+KW_poor$medianLowRate <- apply(KW_poor[2:3],1,median, na.rm=TRUE)
+keywords_low <- KW_poor[order(KW_poor$medianLowRate,decreasing=TRUE)[1:10],]
+keywords_low
+```
+
+We can now use these as our poor keywords.
+```{r}
+low_keys <- as.data.frame(t(keywords_low$medianLowRate))
+colnames(low_keys) <- keywords_low$term
+row.names(low_keys) <- 'lowRating'
+low_keys
+```
+
+And these are our average rating keywords. from the median of 2-4 ratings.
+```{r}
+KW_avg <- average %>% select(term,Rating2termfrequency,Rating3termfrequency,
+                             Rating4termfrequency)
+KW_avg$medianAvgRate <- apply(KW_avg[2:4],1,median, na.rm=TRUE)
+keywords_avg <- KW_avg[order(KW_avg$medianAvgRate,decreasing=TRUE)[1:10],]
+keywords_avg
+```
+
+The keywords for the average ratings is a median value of the ratings 2 through 4.
+```{r}
+avg_keys <- as.data.frame(t(keywords_avg$medianAvgRate))
+colnames(avg_keys) <- keywords_avg$term
+row.names(avg_keys) <- 'avgRating'
+avg_keys
+```
+
+Lets get our great ratings as the median of the 4-5 ratings.
+```{r}
+KW_grt <- goodGreat %>% select(term,Rating5termfrequency,Rating4termfrequency)
+KW_grt$medianGrtRate <- apply(KW_grt[2:3],1,median, na.rm=TRUE)
+keywords_grt <- KW_grt[order(KW_grt$medianGrtRate,decreasing=TRUE)[1:10],]
+keywords_grt
+```
+
+
+The keywords for the great ratings is a median value of the ratings 4 through 5.
+```{r}
+grt_keys <- as.data.frame(t(keywords_grt$medianGrtRate))
+colnames(grt_keys) <- keywords_grt$term
+row.names(grt_keys) <- 'grtRating'
+grt_keys
+```
+
+Now lets combine these tables.
+```{r}
+j1 <- full_join(grt_keys,avg_keys)
+j1
+```
+
+```{r}
+j2 <- full_join(low_keys,j1)
+row.names(j2) <- c('low','great','average')
+j2
+```
+
+Lets fill in these words manually with their median values. Optionally, we could just take the complete.cases of this table and find those words to use as features.
+```{r}
+j2$not[2] <- KW_grt[grep('^not$',KW_grt$term),4]
+j2$but[2] <- KW_grt[grep('^but$',KW_grt$term),4]
+
+j2$good[1] <- KW_poor[grep('^good$',KW_poor$term),4]
+j2$good[3] <- KW_avg[grep('^good$',KW_avg$term),4]
+
+j2$with[1] <- KW_poor[grep('^with$',KW_poor$term),4]
+j2$with[3] <- KW_avg[grep('^with$',KW_poor$term),4]
+j2
+
+```
+
+But these values are for counts out of the entire count of reviews for each rating. So we should divide each value by the total number of documents to get a ratio or the values in each rating as low, great, or average.
+```{r}
+keys_t <- as.data.frame(t(j2))
+keys_t
+
+```
+
+```{r}
+s1 <- sum(Reviews13$userRatingValue==1)+sum(Reviews13$userRatingValue==2)
+s2 <- sum(Reviews13$userRatingValue==2)+sum(Reviews13$userRatingValue==3)+
+              sum(Reviews13$userRatingValue==4)
+s3 <- sum(Reviews13$userRatingValue==4)+sum(Reviews13$userRatingValue==5)
+
+keys_t$low <- round(((keys_t$low)/s1),2)
+keys_t$great <- round(((keys_t$great)/s3),2)
+keys_t$average <- round(((keys_t$average)/s2),2)
+keys_t
+```
+
+The above table is for document term frequency on average that is how many times the term shows up in a single document by category of low, average, or great rating. We made these tables earlier, FREQ_R1, ...,FREQ_R5.
+
+
+What about the ratio for the term against the number in terms in total for all ratings? Lets put that table together.
+```{r}
+termKeys <- as.data.frame(row.names(keys_t))
+colnames(termKeys) <- 'term'
+
+tk1 <- merge(termKeys, FREQ_R1, by.x='term', by.y='term')
+tk2 <- merge(tk1,FREQ_R2, by.x='term', by.y='term')
+tk3 <- merge(tk2, FREQ_R3, by.x='term', by.y='term')
+tk4 <- merge(tk3, FREQ_R4, by.x='term', by.y='term')
+tk5 <- merge(tk4, FREQ_R5, by.x='term', by.y='term')
+
+tk5$Rating1_totalTerms <- sum(FREQ_R1$Rating1termfrequency)
+tk5$Rating2_totalTerms <- sum(FREQ_R2$Rating2termfrequency)
+tk5$Rating3_totalTerms <- sum(FREQ_R3$Rating3termfrequency)
+tk5$Rating4_totalTerms <- sum(FREQ_R4$Rating4termfrequency)
+tk5$Rating5_totalTerms <- sum(FREQ_R5$Rating5termfrequency)
+
+#these are total terms over all by rating, not unique terms
+tk5$Rating1_term2totalTerm <- tk5$Rating1termfrequency/tk5$Rating1_totalTerms
+tk5$Rating2_term2totalTerm <- tk5$Rating2termfrequency/tk5$Rating2_totalTerms
+tk5$Rating3_term2totalTerm <- tk5$Rating3termfrequency/tk5$Rating3_totalTerms
+tk5$Rating4_term2totalTerm <- tk5$Rating4termfrequency/tk5$Rating4_totalTerms
+tk5$Rating5_term2totalTerm <- tk5$Rating5termfrequency/tk5$Rating5_totalTerms
+
+termToTotalTerms <- tk5 %>% select(term,Rating1_term2totalTerm,
+                                   Rating2_term2totalTerm,
+                                   Rating3_term2totalTerm,
+                                   Rating4_term2totalTerm,
+                                   Rating5_term2totalTerm)
+term_to_totalTerms <- round(termToTotalTerms[,2:6],3)
+row.names(term_to_totalTerms) <- termToTotalTerms$term
+wordToAllWords <- as.data.frame(t(term_to_totalTerms))
+wordToAllWords
+
+```
+
+This table is the total word ratio to all words (not unique words) in each subset of ratings 1-5. 
+
+Once we get our counts of each word in each review, we can compare it to these words and see if it appears in the document this percent of the time to aid in classifying each review into the correct rating.
+
+Lets use the stringr library's function str_match_all function. Lets clean up the first observation and store it as a string. Then we will use str_match_all to find the exact number of times each keyword is in the review. and put it in our table.
+```{r}
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[1]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- row.names(keys_t)
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c('documentTermCount','term_to_totalDocumentTerms')
+keyValues3 <- round(keyValues3,3)
+keyValues3
+```
+
+Join this table to the wordToAllWords table using dplyr's full join function.
+```{r}
+joinKeys <- full_join(wordToAllWords,keyValues3)
+r1 <- row.names(wordToAllWords)
+r2 <- row.names(keyValues3)
+names <- c(r1,r2)
+row.names(joinKeys) <- names
+joinKeys
+```
+
+Looking at the table above, we can use the term_to_totalDocumentTerms values of this observation compared to the ratios of the term2totalTerm ratings for each of these 12 words, and choose the rating with the lowest difference or distance between, then to add up the votes for ratings 1-5 for all 12 choices. There should be a clear winner in this algorithm of selecting or predicting the sentiment rating. So, lets try it out.
+```{r}
+and_diff <- joinKeys$and[1:5]-joinKeys$and[7]
+but_diff <- joinKeys$but[1:5]-joinKeys$but[7]
+for_diff <- joinKeys[1:5,3]-joinKeys[7,3]
+good_diff <- joinKeys$good[1:5]-joinKeys$good[7]
+have_diff <- joinKeys$have[1:5]-joinKeys$have[7]
+not_diff <- joinKeys$not[1:5]-joinKeys$not[7]
+that_diff <- joinKeys$that[1:5]-joinKeys$that[7]
+the_diff <- joinKeys$the[1:5]-joinKeys$the[7]
+they_diff <- joinKeys$they[1:5]-joinKeys$they[7]
+this_diff <- joinKeys$this[1:5]-joinKeys$this[7]
+with_diff <- joinKeys$with[1:5]-joinKeys$with[7]
+you_diff <- joinKeys$you[1:5]-joinKeys$you[7]
+
+diff <- as.data.frame(t(cbind(and_diff, but_diff, for_diff, good_diff, have_diff, not_diff, 
+              that_diff, the_diff, they_diff, this_diff, with_diff, you_diff)))
+colnames(diff) <- r1
+
+diff$minValue <- apply(diff,1, min)
+diff$vote <- ifelse(diff$Rating1_term2totalTerm==diff$minValue,
+                    1, 
+                    ifelse(diff$Rating2_term2totalTerm==diff$minValue,
+                           2,
+                           ifelse(diff$Rating3_term2totalTerm==diff$minValue,
+                                  3,
+                                  ifelse(diff$Rating4_term2totalTerm==diff$minValue,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+diff$minValue2 <- ifelse(abs(diff$minValue)>abs(diff$Rating1_term2totalTerm),
+                         diff$Rating1_term2totalTerm,
+                         ifelse(abs(diff$minValue)>abs(diff$Rating2_term2totalTerm),
+                                diff$Rating2_term2totalTerm,
+                                ifelse(abs(diff$minValue)>abs(diff$Rating3_term2totalTerm),
+                                       diff$Rating3_term2totalTerm,
+                                       ifelse(abs(diff$minValue)>abs(diff$Rating4_term2totalTerm),
+                                              diff$Rating4_term2totalTerm,
+                                                ifelse(abs(diff$minValue)>abs(diff$Rating5_term2totalTerm),
+                                                  diff$Rating5_term2totalTerm,
+                                                   diff$minValue)
+                                              )
+                                      )
+                                )
+                          )
+  
+diff$vote2 <- ifelse(diff$Rating1_term2totalTerm==diff$minValue2,
+                    1, 
+                    ifelse(diff$Rating2_term2totalTerm==diff$minValue2,
+                           2,
+                           ifelse(diff$Rating3_term2totalTerm==diff$minValue2,
+                                  3,
+                                  ifelse(diff$Rating4_term2totalTerm==diff$minValue2,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )  
+
+
+diff
+```
+
+There is actually a tie between the review being a 5 or a 1 when using vote 1 that takes the minimum value that includes very negative values. We need to make a rule for when this happens. How about try out for if there is a tie, the best of the median rounded up or the mean rounded down. There is also a vote2 field that takes the shortest distance to the review ratio out of each review and votes for that review. Lets see the results of the first vote with only the minimum.
+```{r}
+bestVote <- diff %>% group_by(vote) %>% count()
+bestVote$maxVote <- ifelse(bestVote$n==max(bestVote$n),
+                           1,0)
+bestVote$ratingMean <- ifelse(sum(bestVote$maxVote) > 1,
+                          ifelse(ceiling(mean(bestVote$vote*bestVote$n))>5,
+                                 5, ceiling(mean(bestVote$vote*bestVote$n))), 
+                           ifelse(bestVote$n==max(bestVote$n),
+                                  bestVote$vote,
+                                  0)
+                          )
+bestVote$ratingMedian <- ifelse(sum(bestVote$maxVote) > 1,
+                          ifelse(ceiling(median(bestVote$vote*bestVote$n))>5,
+                                 5,ceiling(median(bestVote$vote*bestVote$n))), 
+                           ifelse(bestVote$n==max(bestVote$n),
+                                  bestVote$vote,
+                                  0)
+                          )
+
+max(bestVote$ratingMean)
+max(bestVote$ratingMedian)
+
+```
+
+```{r}
+bestVote
+```
+
+From the above table, it identified a tie in votes, and calculated the mean and medians of the votes*the count for each vote as a dot product. The mean is actually 7, so a constraint was also placed or wrapped around the ceiling of the mean if it is greater than our highest rating, that it be the highest rating. Same for the median. Lets use Vote2 which takes the shortest distance from the term to Total Term frequency ratio of the review to each ratings term to Total Term frequency ratio. We could choose to accept the mean driven vote of 5 or median driven vote of 4.But lets see how vote2 measures in for predicting most likely reveiw.
+```{r}
+bestVote2 <- diff %>% group_by(vote2) %>% count()
+bestVote2$maxVote2 <- ifelse(bestVote2$n==max(bestVote2$n),
+                           1,0)
+bestVote2$ratingMean2 <- ifelse(sum(bestVote2$maxVote2) > 1,
+                          ifelse(ceiling(mean(bestVote2$vote2*bestVote2$n))>5,
+                                 5, ceiling(mean(bestVote2$vote2*bestVote2$n))), 
+                           ifelse(bestVote2$n==max(bestVote2$n),
+                                  bestVote2$vote2,
+                                  0)
+                          )
+bestVote2$ratingMedian2 <- ifelse(sum(bestVote2$maxVote2) > 1,
+                          ifelse(ceiling(median(bestVote2$vote2*bestVote2$n))>5,
+                                 5,ceiling(median(bestVote2$vote2*bestVote2$n))), 
+                           ifelse(bestVote2$n==max(bestVote2$n),
+                                  bestVote2$vote2,
+                                  0)
+                          )
+
+max(bestVote2$ratingMean2)
+max(bestVote2$ratingMedian2)
+```
+```{r}
+bestVote2
+```
+
+When using the shortest distance between the ratio of term to total terms in the review, instead of the minimum distance, the highest votes were not a tie, but for a 1 rating.
+
+Lets see what this rating is. The string object was taken from the first review of the business.
+```{r}
+Reviews13[1,]
+
+```
+
+It turns out using the highest vote of the shortest distance is not the best in predicting the sentiment, but it looks like the ceiling of the mean of the dot product when a tie based on selecting the minimum value from the difference between ratios in each rating of word to total words in the document subset by rating is best when using the ratio of each review as a ratio of document term to total terms in the document. Lets re-run this script with a different review now and compare results. We only used the words within each rating ratio and most frequent within a broad category of low (1s and 2s), average(2s,3s,and 4s), and great(4s and 5s) only in selecting best keywords by median ratios for each of those three categories for describing each review rating. Also, the stopwords were not excluded like they normally are or in some cases they are.
+
+
+***
+***
+***
+
+We are going to test out this algorithm using only the top 12 keywords of three groups but keeping the five ratings to predict by vote. Our best prediction the first run was on breaking a tie with the ceiling of the mean or the highest value of the vote if it is the highest. Lets use the 2nd review this time.
+```{r}
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[2]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- row.names(keys_t)
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c('documentTermCount','term_to_totalDocumentTerms')
+keyValues3 <- round(keyValues3,3)
+keyValues3
+```
+
+Join this table to the wordToAllWords table using dplyr's full join function.
+```{r}
+joinKeys <- full_join(wordToAllWords,keyValues3)
+r1 <- row.names(wordToAllWords)
+r2 <- row.names(keyValues3)
+names <- c(r1,r2)
+row.names(joinKeys) <- names
+joinKeys
+```
+
+Looking at the table above, we can use the term_to_totalDocumentTerms values of this observation compared to the ratios of the term2totalTerm ratings for each of these 12 words, and choose the rating with the lowest difference or distance between, then to add up the votes for ratings 1-5 for all 12 choices. There should be a clear winner in this algorithm of selecting or predicting the sentiment rating. So, lets try it out.
+```{r}
+and_diff <- joinKeys$and[1:5]-joinKeys$and[7]
+but_diff <- joinKeys$but[1:5]-joinKeys$but[7]
+for_diff <- joinKeys[1:5,3]-joinKeys[7,3]
+good_diff <- joinKeys$good[1:5]-joinKeys$good[7]
+have_diff <- joinKeys$have[1:5]-joinKeys$have[7]
+not_diff <- joinKeys$not[1:5]-joinKeys$not[7]
+that_diff <- joinKeys$that[1:5]-joinKeys$that[7]
+the_diff <- joinKeys$the[1:5]-joinKeys$the[7]
+they_diff <- joinKeys$they[1:5]-joinKeys$they[7]
+this_diff <- joinKeys$this[1:5]-joinKeys$this[7]
+with_diff <- joinKeys$with[1:5]-joinKeys$with[7]
+you_diff <- joinKeys$you[1:5]-joinKeys$you[7]
+
+diff <- as.data.frame(t(cbind(and_diff, but_diff, for_diff, good_diff, have_diff, not_diff, 
+              that_diff, the_diff, they_diff, this_diff, with_diff, you_diff)))
+colnames(diff) <- r1
+
+diff$minValue <- apply(diff,1, min)
+diff$vote <- ifelse(diff$Rating1_term2totalTerm==diff$minValue,
+                    1, 
+                    ifelse(diff$Rating2_term2totalTerm==diff$minValue,
+                           2,
+                           ifelse(diff$Rating3_term2totalTerm==diff$minValue,
+                                  3,
+                                  ifelse(diff$Rating4_term2totalTerm==diff$minValue,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+diff$minValue2 <- ifelse(abs(diff$minValue)>abs(diff$Rating1_term2totalTerm),
+                         diff$Rating1_term2totalTerm,
+                         ifelse(abs(diff$minValue)>abs(diff$Rating2_term2totalTerm),
+                                diff$Rating2_term2totalTerm,
+                                ifelse(abs(diff$minValue)>abs(diff$Rating3_term2totalTerm),
+                                       diff$Rating3_term2totalTerm,
+                                       ifelse(abs(diff$minValue)>abs(diff$Rating4_term2totalTerm),
+                                              diff$Rating4_term2totalTerm,
+                                                ifelse(abs(diff$minValue)>abs(diff$Rating5_term2totalTerm),
+                                                  diff$Rating5_term2totalTerm,
+                                                   diff$minValue)
+                                              )
+                                      )
+                                )
+                          )
+  
+diff$vote2 <- ifelse(diff$Rating1_term2totalTerm==diff$minValue2,
+                    1, 
+                    ifelse(diff$Rating2_term2totalTerm==diff$minValue2,
+                           2,
+                           ifelse(diff$Rating3_term2totalTerm==diff$minValue2,
+                                  3,
+                                  ifelse(diff$Rating4_term2totalTerm==diff$minValue2,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )  
+
+
+diff
+```
+
+We need to make a rule for when this happens. How about try out for if there is a tie, the best of the median rounded up or the mean rounded down. There is also a vote2 field that takes the shortest distance to the review ratio out of each review and votes for that review. Lets see the results of the first vote with only the minimum.
+```{r}
+bestVote <- diff %>% group_by(vote) %>% count()
+bestVote$maxVote <- ifelse(bestVote$n==max(bestVote$n),
+                           1,0)
+bestVote$ratingMean <- ifelse(sum(bestVote$maxVote) > 1,
+                          ifelse(ceiling(mean(bestVote$vote*bestVote$n))>5,
+                                 5, ceiling(mean(bestVote$vote*bestVote$n))), 
+                           ifelse(bestVote$n==max(bestVote$n),
+                                  bestVote$vote,
+                                  0)
+                          )
+bestVote$ratingMedian <- ifelse(sum(bestVote$maxVote) > 1,
+                          ifelse(ceiling(median(bestVote$vote*bestVote$n))>5,
+                                 5,ceiling(median(bestVote$vote*bestVote$n))), 
+                           ifelse(bestVote$n==max(bestVote$n),
+                                  bestVote$vote,
+                                  0)
+                          )
+
+max(bestVote$ratingMean)
+max(bestVote$ratingMedian)
+
+```
+Our best algorithm selected 5 as the best vote, the first run of this program it was a 5 and the mean rating won that prediction.
+```{r}
+bestVote
+```
+
+Lets see how vote2 measures in for predicting most likely reveiw.
+```{r}
+bestVote2 <- diff %>% group_by(vote2) %>% count()
+bestVote2$maxVote2 <- ifelse(bestVote2$n==max(bestVote2$n),
+                           1,0)
+bestVote2$ratingMean2 <- ifelse(sum(bestVote2$maxVote2) > 1,
+                          ifelse(ceiling(mean(bestVote2$vote2*bestVote2$n))>5,
+                                 5, ceiling(mean(bestVote2$vote2*bestVote2$n))), 
+                           ifelse(bestVote2$n==max(bestVote2$n),
+                                  bestVote2$vote2,
+                                  0)
+                          )
+bestVote2$ratingMedian2 <- ifelse(sum(bestVote2$maxVote2) > 1,
+                          ifelse(ceiling(median(bestVote2$vote2*bestVote2$n))>5,
+                                 5,ceiling(median(bestVote2$vote2*bestVote2$n))), 
+                           ifelse(bestVote2$n==max(bestVote2$n),
+                                  bestVote2$vote2,
+                                  0)
+                          )
+
+max(bestVote2$ratingMean2)
+max(bestVote2$ratingMedian2)
+```
+```{r}
+bestVote2
+```
+
+Well they have the same results almost for both vote and vote2, except that vote2 this time included all ratings, the first run the rating 3 had no votes, but the vote is the same as a 1 rating, while the ceiling of the mean is a 5 rating, and the ceiling of the median is a 4 rating.
+
+Lets see what this rating is. The string object was taken from the first review of the business.
+```{r}
+Reviews13[2,]
+
+```
+
+This time, the ceiling of the median using the minimum difference between the document to corpus of each rating ratios of term to total terms in the document versus term to total terms within all documents in each rating.
+
+We should try another, maybe a review closer to the tail to see if the minimum distance is still the best, but choosing mean or median is still a fixer upper. We still haven't used the Reviews13 regular features we spent some time extracting and adding to base what the review's rating will be.
+Also, adding a visNetwork link analysis plot to show how the ratings and keywords look or link to each other by weight as the term to total terms ratio, or forgetting these keywords and using the top full join keywords by frequency in each rating. 
+
+***
+***
+***
+
+Lets re-run this script on another review closer to the tail to see how the results are predicted.
+```{r}
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[600]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- row.names(keys_t)
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c('documentTermCount','term_to_totalDocumentTerms')
+keyValues3 <- round(keyValues3,3)
+keyValues3
+```
+
+Join this table to the wordToAllWords table using dplyr's full join function.
+```{r}
+joinKeys <- full_join(wordToAllWords,keyValues3)
+r1 <- row.names(wordToAllWords)
+r2 <- row.names(keyValues3)
+names <- c(r1,r2)
+row.names(joinKeys) <- names
+joinKeys
+```
+
+Looking at the table above, we can use the term_to_totalDocumentTerms values of this observation compared to the ratios of the term2totalTerm ratings for each of these 12 words, and choose the rating with the lowest difference or distance between, then to add up the votes for ratings 1-5 for all 12 choices. There should be a clear winner in this algorithm of selecting or predicting the sentiment rating. So, lets try it out.
+```{r}
+and_diff <- joinKeys$and[1:5]-joinKeys$and[7]
+but_diff <- joinKeys$but[1:5]-joinKeys$but[7]
+for_diff <- joinKeys[1:5,3]-joinKeys[7,3]
+good_diff <- joinKeys$good[1:5]-joinKeys$good[7]
+have_diff <- joinKeys$have[1:5]-joinKeys$have[7]
+not_diff <- joinKeys$not[1:5]-joinKeys$not[7]
+that_diff <- joinKeys$that[1:5]-joinKeys$that[7]
+the_diff <- joinKeys$the[1:5]-joinKeys$the[7]
+they_diff <- joinKeys$they[1:5]-joinKeys$they[7]
+this_diff <- joinKeys$this[1:5]-joinKeys$this[7]
+with_diff <- joinKeys$with[1:5]-joinKeys$with[7]
+you_diff <- joinKeys$you[1:5]-joinKeys$you[7]
+
+diff <- as.data.frame(t(cbind(and_diff, but_diff, for_diff, good_diff, have_diff, not_diff, 
+              that_diff, the_diff, they_diff, this_diff, with_diff, you_diff)))
+colnames(diff) <- r1
+
+diff$minValue <- apply(diff,1, min)
+diff$vote <- ifelse(diff$Rating1_term2totalTerm==diff$minValue,
+                    1, 
+                    ifelse(diff$Rating2_term2totalTerm==diff$minValue,
+                           2,
+                           ifelse(diff$Rating3_term2totalTerm==diff$minValue,
+                                  3,
+                                  ifelse(diff$Rating4_term2totalTerm==diff$minValue,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+diff$minValue2 <- ifelse(abs(diff$minValue)>abs(diff$Rating1_term2totalTerm),
+                         diff$Rating1_term2totalTerm,
+                         ifelse(abs(diff$minValue)>abs(diff$Rating2_term2totalTerm),
+                                diff$Rating2_term2totalTerm,
+                                ifelse(abs(diff$minValue)>abs(diff$Rating3_term2totalTerm),
+                                       diff$Rating3_term2totalTerm,
+                                       ifelse(abs(diff$minValue)>abs(diff$Rating4_term2totalTerm),
+                                              diff$Rating4_term2totalTerm,
+                                                ifelse(abs(diff$minValue)>abs(diff$Rating5_term2totalTerm),
+                                                  diff$Rating5_term2totalTerm,
+                                                   diff$minValue)
+                                              )
+                                      )
+                                )
+                          )
+  
+diff$vote2 <- ifelse(diff$Rating1_term2totalTerm==diff$minValue2,
+                    1, 
+                    ifelse(diff$Rating2_term2totalTerm==diff$minValue2,
+                           2,
+                           ifelse(diff$Rating3_term2totalTerm==diff$minValue2,
+                                  3,
+                                  ifelse(diff$Rating4_term2totalTerm==diff$minValue2,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )  
+
+
+diff
+```
+
+Lets see the results of the first vote with only the minimum.
+```{r}
+bestVote <- diff %>% group_by(vote) %>% count()
+bestVote$maxVote <- ifelse(bestVote$n==max(bestVote$n),
+                           1,0)
+bestVote$ratingMean <- ifelse(sum(bestVote$maxVote) > 1,
+                          ifelse(ceiling(mean(bestVote$vote*bestVote$n))>5,
+                                 5, ceiling(mean(bestVote$vote*bestVote$n))), 
+                           ifelse(bestVote$n==max(bestVote$n),
+                                  bestVote$vote,
+                                  0)
+                          )
+bestVote$ratingMedian <- ifelse(sum(bestVote$maxVote) > 1,
+                          ifelse(ceiling(median(bestVote$vote*bestVote$n))>5,
+                                 5,ceiling(median(bestVote$vote*bestVote$n))), 
+                           ifelse(bestVote$n==max(bestVote$n),
+                                  bestVote$vote,
+                                  0)
+                          )
+
+max(bestVote$ratingMean)
+max(bestVote$ratingMedian)
+
+```
+
+```{r}
+bestVote
+```
+
+Lets see how vote2 measures in for predicting most likely reveiw.
+```{r}
+bestVote2 <- diff %>% group_by(vote2) %>% count()
+bestVote2$maxVote2 <- ifelse(bestVote2$n==max(bestVote2$n),
+                           1,0)
+bestVote2$ratingMean2 <- ifelse(sum(bestVote2$maxVote2) > 1,
+                          ifelse(ceiling(mean(bestVote2$vote2*bestVote2$n))>5,
+                                 5, ceiling(mean(bestVote2$vote2*bestVote2$n))), 
+                           ifelse(bestVote2$n==max(bestVote2$n),
+                                  bestVote2$vote2,
+                                  0)
+                          )
+bestVote2$ratingMedian2 <- ifelse(sum(bestVote2$maxVote2) > 1,
+                          ifelse(ceiling(median(bestVote2$vote2*bestVote2$n))>5,
+                                 5,ceiling(median(bestVote2$vote2*bestVote2$n))), 
+                           ifelse(bestVote2$n==max(bestVote2$n),
+                                  bestVote2$vote2,
+                                  0)
+                          )
+
+max(bestVote2$ratingMean2)
+max(bestVote2$ratingMedian2)
+```
+```{r}
+bestVote2
+```
+
+These keywords aren't really showing much benefit, since they keep having the same result. A 1 rating for vote2 by shortest distance between review to all reviews' term to total terms ratio and a 5 for ceiling of the mean of dot product of votes and ratings by minimum values of ratio differences, and a 4 for the ceiling of the median of dot product of votes and ratings by minimum values of ratio differences.
+
+Lets see what this rating is. The string object was taken from the first review of the business.
+```{r}
+Reviews13[600,]
+
+```
+
+The rating is actually a 5. So, the ceiling of the mean value of the dot product of votes by ratings selected by minimum value of ratio of review to ratio of reviews in each rating using each term to total terms in the single review to each collection of reviews in each rating of 1-5.
+
+We can later add these features to each observation, make 70% a trainging set to build and train the model to predict the rating. Then us the other 30% the testing set to test the model built on the other partitioned 70% to predict the rating. We would have to run the best model above which used the mean of dot product of the votes by ratings, then the ceiling of that value which rounds up on all measures. As this algorithm was more accurate in predicting the rating.We could either do that now, or step away for a while to let it simmer and see what this data on reviews and key words looks like in a link analysis plot. Why don't we do the latter and do it.
+
+***
+***
+***
+
+Lets visualize these keywords by the layout of these keywords to rating by ratios as weight, ratings as edges, and nodes as keywords. We have to first take this information from the data table on the ratios of terms counted each per documents in each rating to total terms per documents per rating. This data table is the wordToAllWords table. From this table we have our weights and our ratings. The weights are what will make the arrows width smaller or larger than the other arrow widths depending on how much weight they have on each word linked to a specific rating. The ratings are the edges. The nodes are the words, and those are also in this table. The label in the nodes table will be the keyword, and the title will be the rating. The id is the row number from the nodes table, which is the from column in the edges table. and the to column in the edges table will be the rating. Lets also add another feature from the Reviews13 data table for the day of the week as Monday through Sunday by adding a feature that takes the day of the week from the date field we added earlier in the data. Lets read in those two data tables and make sure our libraries are loaded in to Rstudio from the top of this script.The visNetwork and igraph link analysis and visualization libraries will be used for this link analysis. The package igraph makes the visNetwork package work faster in uploading and allows editing and modifying the link analysis network using various customized plot layouts and color schemes as well as other added value to the visualization.
+
+Lets add the day of the week using the lubridate package to the Reviews13 datatable Date field.
+```{r}
+head(Reviews13)
+```
+
+When looking at the table above there are other factors that could be grouped by, such as the business type, the cost as low, average, or high, then number of photos each user has, etc. But we will just focus on using the day of the week. Lets add the day of the week now. First lets make sure the Date feature is recognized as a date feature.
+```{r}
+class(Reviews13$Date)
+```
+
+It is a factor, so we will change it to a date feature type.
+```{r}
+Reviews13$Date <- as.Date(Reviews13$Date)
+class(Reviews13$Date)
+```
+
+Now lets extract the day of the week from our date feature.
+```{r}
+date <- ymd(Reviews13$Date)
+date <- day(Reviews13$Date)
+
+Reviews13$weekday <- wday(date, label=TRUE, week_start=1)#set start of week to Monday)
+head(Reviews13$weekday)
+```
+
+Now, we could have attached this information to the count of keywords in each review, but we skipped that step, and we have to make the process automated with a for loop to take every row in data table feature and keep applying this string filter program that counts the 12 words in each observation, and returns a vector that is row binded to the previous vector until now more observations left. We could do that later, you could do it now, or we could try it now and see if it is as simple as it sounds to set up. I will try it once, and if it will take more manipulation, or time, we will just work with what is readily available to focus on the link analysis network design we already planned and created instructions though loose on how to create.
+This is the keyword extraction script:
+```{r}
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[600]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- row.names(keys_t)
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c('documentTermCount','term_to_totalDocumentTerms')
+keyValues3 <- round(keyValues3,3)
+keyValues3
+```
+
+We see from this output per review, that we could first add a paste function to attach a new name to every review by row number in the data table Reviews13. We need to make sure they are the correct row number values by order of their listed review.
+```{r}
+row.names(Reviews13) <- NULL
+row.names(Reviews13) <- as.character(paste(row.names(Reviews13)))
+head(row.names(Reviews13))
+```
+Looks like they are ordered. There are 614 reviews to extract the 12 keyword counts and ratio of words per document to total words per document. Lets try wrapping this up in a for loop.
+```{r, eval=FALSE}
+
+keys <- row.names(keys_t)
+
+strTable1 <- as.data.frame(t(as.numeric(paste(c(0,0,0,0,0,0,0,0,0,0,0,0)))))
+colnames(strTable1) <- keys
+
+str <- as.data.frame(Reviews13$userReviewOnlyContent)
+colnames(str) <- 'review'
+str$review <- as.character(paste(str$review))
+row.names(str) <- row.names(Reviews13)
+
+for (review in (str$review))
+  { 
+    
+      s <- gsub('[!|.|,|\n|\']',' ',review,perl=TRUE)
+      s <- gsub('[  ]',' ',s)
+      s <- trimws(s, which=c('both'), whitespace='[\t\r\n ]')
+
+      totalTerms <- length((strsplit(s, split=' ')[[1]]))
+      
+      s <- strsplit(s, split=' ')
+
+      and <- str_match_all(s,' [aA][nN][dD] ')
+      AND <- length(and[[1]])
+
+      the <- str_match_all(s,' [tT][hH][eE] ')
+      THE <- length(the[[1]])
+
+      for1 <- str_match_all(s,' [fF][oO][rR] ')
+      FOR1 <- length(for1[[1]])
+
+      have <- str_match_all(s,' [hH][aA][vV][eE] ')
+      HAVE <- length(have[[1]])
+
+      that <- str_match_all(s,' [tT][hH][aA][tT] ')
+      THAT <- length(that[[1]])
+
+      they <- str_match_all(s,' [tT][hH][eE][yY] ')
+      THEY <- length(they[[1]])
+
+      this <- str_match_all(s,' [tT][hH][iI][sS] ')
+      THIS <- length(this[[1]])
+
+      you <- str_match_all(s,' [yY][oO][uU] ')
+      YOU <- length(you[[1]])
+
+      not <- str_match_all(s,' [nN][oO][tT] ')
+      NOT <- length(not[[1]])
+
+      but <- str_match_all(s,' [bB][uU][tT] ')
+      BUT <- length(but[[1]])
+
+      good <- str_match_all(s,' [gG][oO][oO][dD] ')
+      GOOD <- length(good[[1]])
+
+      with <- str_match_all(s,' [wW][iI][tT][hH] ')
+      WITH <- length(with[[1]])
+
+      values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+      row.names(values) <- keys
+
+      keyValues <- as.data.frame(t(values))
+      keyValues2 <- keyValues/totalTerms
+      keyValues3 <- rbind(keyValues,keyValues2)
+      
+  for (row in seq_along(str$review))
+    {
+  row.names(keyValues3) <- c(paste('documentTermCount',row,sep='_'),
+                           paste('term_to_totalDocumentTerms',row, sep='_'))
+                           
+      keyValues3 <- round(keyValues3,3) #data table review i
+  keyValues3
+
+      strTable1 <- rbind(keyValues3, strTable1)
+    }
+}
+
+```
+
+
+I played around with the for loop longer than expected, and it needs more work. It isn't doing what I want it to do. I will manually get a handful of values later as needed, or move on to the vis network. 
+
+***
+***
+***
+
+Lets move onto the visNetwork. We are using the wordToAllWords and Reviews13 tables. Lets select our columns from each.
+```{r}
+visNodes <- Reviews13 %>% select(userRatingValue,LowAvgHighCost, businessType,weekday)
+
+visNodes$label <- visNodes$userRatingValue
+visNodes$label <- paste('rate',visNodes$label,sep='')
+
+visNodes$title <- visNodes$LowAvgHighCost
+visNodes$title <- paste(visNodes$title,'Cost',sep='')
+
+visNodes$group <- visNodes$weekday
+
+visEdges <- as.data.frame(t(wordToAllWords ))
+colnames(visEdges) <- c('rate1','rate2','rate3','rate4','rate5')
+visEdges$label <- row.names(visEdges)
+
+#the weight is the ratio term2alltermsPerRating
+visEdges <- gather(visEdges, 'rating','weight', 1:5) 
+head(visNodes)
+```
+
+```{r}
+Nodes1 <- visNodes %>% select(label,title,group)
+head(Nodes1)
+```
+
+```{r}
+Nodes2 <- merge(Nodes1, visEdges, by.x='label', by.y='rating')
+Nodes2$term <- Nodes2$label.y
+Nodes2$id <- row.names(Nodes2)
+Nodes3 <- Nodes2 %>% select(id,label,title,group,term)
+head(Nodes3)
+```
+
+
+```{r}
+head(visEdges)
+```
+
+```{r}
+Edges2 <- visEdges %>% mutate(from=plyr::mapvalues(visEdges$rating, 
+                                                 from=Nodes3$label,to=Nodes3$id))
+Edges3 <- Edges2 %>% mutate(to=plyr::mapvalues(Edges2$label, 
+                                               from=Nodes3$term, to=Nodes3$id))
+Edges4 <- Edges3 %>% select(from,to,label,weight)
+head(Edges4)
+```
+
+Now lets use visNetwork and igraph to plot these nodes and edges.
+```{r}
+
+visNetwork(nodes=Nodes3, edges=Edges4, main='Weekday Groups of Rating and 12 Keywords') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=FALSE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout() %>%
+  visLegend
+```
+
+The above is very large because it has the added groups and keywords of 12 to run combinations against the original 614 observations. Lets try limiting the observations.
+
+***
+
+We will work from the beginning of the last visNetwork plot.
+```{r}
+visNodes <- Reviews13 %>% select(userRatingValue,LowAvgHighCost, businessType,weekday)
+
+visNodes$label <- visNodes$userRatingValue
+visNodes$label <- paste('rate',visNodes$label,sep='')
+
+visNodes$title <- visNodes$LowAvgHighCost
+visNodes$title <- paste(visNodes$title,'Cost',sep='')
+
+visNodes$group <- visNodes$weekday
+head(visNodes)
+```
+
+```{r}
+visEdges <- as.data.frame(t(wordToAllWords ))
+colnames(visEdges) <- c('rate1','rate2','rate3','rate4','rate5')
+visEdges$label <- row.names(visEdges)
+
+#the weight is the ratio term2alltermsPerRating
+visEdges <- gather(visEdges, 'rating','weight', 1:5) 
+head(visEdges)
+```
+
+```{r}
+Nodes1 <- visNodes %>% select(weekday:group)
+head(Nodes1)
+```
+
+```{r}
+Nodes2 <- merge(Nodes1, visEdges, by.x='label', by.y='rating')
+Nodes2$term <- Nodes2$label.y
+Nodes2$id <- row.names(Nodes2)
+Nodes3 <- Nodes2 %>% select(id,label,title,group,term,weight)
+head(Nodes3)
+```
+
+Now subset from Nodes3 and make the edges table from this table.
+```{r}
+Nodes4 <- subset(Nodes3, (Nodes3$group=='Mon'|Nodes3$group=='Wed'|Nodes3$group=='Sat') &
+                   (Nodes3$term=='this'|Nodes3$term=='they'|Nodes3$term=='have'|
+                      Nodes3$term=='you'|Nodes3$term=='not'|Nodes3$term=='good'))
+row.names(Nodes4) <- NULL
+Nodes4$id <- as.factor(row.names(Nodes4))
+head(Nodes4)
+```
+
+```{r}
+Edges1 <- Nodes4 %>% select(label,term,group,weight)
+Edges2 <- Edges1 %>% mutate(from=plyr::mapvalues(Edges1$label, 
+                                                 from=Nodes4$label,to=Nodes4$id))
+Edges3 <- Edges2 %>% mutate(to=plyr::mapvalues(Edges2$term, 
+                                               from=Nodes4$term, to=Nodes4$id))
+Edges4 <- Edges3 %>% select(from,to,label,term,group,weight)
+Edges4$label <- Edges4$term
+head(Edges4)
+```
+
+
+```{r}
+
+visNetwork(nodes=Nodes4, edges=Edges4, main='Three Weekday Groups of Five Ratings and Five Keywords') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=FALSE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout() %>%
+  visLegend
+```
+
+
+Lets make another visualization on price and ratings with terms omitted. I used five keywords instead of three as planned.
+
+We well use the Reviews13 data table. And select the features needed.
+```{r}
+visNodes3 <- Reviews13 %>% select(userRatingValue,LowAvgHighCost,businessReplied,friends)
+
+visNodes3$id <- row.names(visNodes3)
+visNodes3$weight <- visNodes3$friends/max(visNodes3$friends,na.rm=TRUE)
+visNodes3$group <- visNodes3$LowAvgHighCost
+visNodes3$label <- as.factor(paste('rating', visNodes3$userRatingValue, sep=' '))
+visNodes3$title <- visNodes3$businessReplied
+
+head(visNodes3)
+```
+
+```{r}
+nodes1 <- visNodes3 %>% select(id,label,title, group)
+
+edges1 <- visNodes3 %>% select(id,label,group,weight)
+edges1$from <- edges1$id
+edges2 <- edges1 %>% mutate(to = plyr::mapvalues(edges1$group, from=nodes1$group, to = nodes1$id))
+
+edges3 <- edges2 %>% select(from,to,label, group,weight)
+head(edges3)
+```
+
+```{r}
+head(nodes1)
+```
+
+```{r}
+
+visNetwork(nodes=nodes1, edges=edges3, main='Ratings Cost if business replied and Number of Friends as arrow weights') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=FALSE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout() %>%
+  visLegend
+
+```
+
+We can see in the above plot of the ratings in groups by cost of either high, average, or low, that there are almost the same amount of reviews in each group. When hovering the nodes are going to show if the business replied to his or her review as yes if they did and as no if not. When zooming in on the nodes of each group you can see the rating and arrow weights of the number of friends each review has as ratios of the number of friends a user has divided by the max number of friends all users have.
+
+
+Lets build another network but with different groupings.
+```{r}
+visNodes3 <- Reviews13 %>% select(userRatingValue,LowAvgHighCost,businessReplied,friends)
+
+visNodes3$id <- row.names(visNodes3)
+visNodes3$weight <- visNodes3$friends/max(visNodes3$friends,na.rm=TRUE)
+visNodes3$label <- as.factor(paste(visNodes3$LowAvgHighCost,'cost',sep=' '))
+visNodes3$group <- as.factor(paste('rating', visNodes3$userRatingValue, sep=' '))
+visNodes3$title <- paste(visNodes3$friends,'friends',sep=' ')
+
+head(visNodes3)
+```
+
+
+```{r}
+nodes1 <- visNodes3 %>% select(id,label,title, group)
+
+edges1 <- visNodes3 %>% select(id,label,group,weight)
+edges1$from <- edges1$id
+edges2 <- edges1 %>% mutate(to = plyr::mapvalues(edges1$group, from=nodes1$group, to = nodes1$id))
+
+edges3 <- edges2 %>% select(from,to,label, group,weight)
+head(edges3)
+```
+
+```{r}
+head(nodes1)
+
+```
+
+```{r}
+
+visNetwork(nodes=nodes1, edges=edges3, main='Ratings as Groups and Cost as Labels with Number of Friends as Arrow Weights') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=FALSE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout() %>%
+  visLegend(ncol=2)
+
+```
+
+
+
+
+The above visual network is great for looking at the number of reviews in each rating, but also when zooming in to see the cost as Low, High, or Average and hovering shows how many social media friends each reviewer has.
+
+***
+***
+***
+
+
+We should make a visual network of the keywords and the ratings to go with and maybe a couple different visualizations on our manually built best model for predicting ratings based on the ceiling of the median of the dot product of votes times ratings when there is a tie between rating votes that were voted on by which review has the minimum value of the ratio of term to total terms in the document to term to total terms by rating.
+
