@@ -1,0 +1,241 @@
+---
+title: "Extracting the keywords"
+author: "Janis Corona"
+date: "4/1/2020"
+output: html_document
+---
+
+This is a script that works on the for loop to get the keywords proposed in the other script, SentimentAnalysisReveiwsMixedBusinessModels.Rmd. 
+
+```{r}
+Reviews13 <- read.csv('cleanedRegexReviews13.csv',sep=',', header=TRUE, na.strings=c('',' ','NA'))
+```
+
+I ran this next chunk from 1:30 of the 614 reviews manually.
+```{r}
+num <- 30
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[num]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- c("the",  "and" , "for" , "have" ,"that" ,"they" ,"this" ,"you" , 
+          "not" , "but"  ,"good" ,"with")
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c(paste('documentTermCount', num, sep='_'),
+                           paste('term_to_totalDocumentTerms', num, sep='_'))
+keyValues3 <- round(keyValues3,3)
+
+keyValues4 <- as.matrix(keyValues3)
+cat(keyValues4[1,1:12],file='keyValues3.csv',append=TRUE, sep='\n',fill=TRUE)
+cat(keyValues4[2,1:12],file='keyValues3_ratios.csv',append=TRUE, sep='\n',fill=TRUE)
+
+```
+
+This chunk above produces two csv files where every 12 lines are the keywords in keyValues3.csv and every 12 lines in keyValues3_ratios.csv are the keyword term to total terms in the review as a ratio. Not all the keywords were used in every review. 
+Lets read in these files.
+```{r}
+kw <- read.csv('keyValues3.csv', sep=',', header=FALSE,  
+                na.strings=c('',' ','NA'))
+kw1 <- kw$V1
+```
+
+Lets make this into a matrix of 12 rows and 30 columns of each observations.
+```{r}
+KW <- matrix(kw1, nrow=12,ncol=30,byrow=FALSE)
+
+KW1 <- as.data.frame(t(KW))
+row.names(KW1) <- NULL
+colnames(KW1) <- keys
+```
+
+Now lets read in the keyword ratios.
+```{r}
+kwr <- read.csv('keyValues3_ratios.csv', sep=',', header=FALSE, na.strings=c('',' ','NA'))
+kwr1 <- kwr$V1
+
+KWR <- matrix(kwr1, nrow=12,ncol=30,byrow=FALSE)
+KWR1 <- as.data.frame(t(KWR))
+row.names(KWR1) <- NULL
+colnames(KWR1) <- paste(keys,'ratios',sep='_')
+
+first30kw <- cbind(KW1,KWR1)
+```
+
+The above illustrates the writing to file the values in the reviews for each review and for each keyword and a separate file for the keyword ratios. The matrix function was used to transform the listed data from the cat function that wrote the values to csv into a matrix of the observation row number in the order of reviews from the Reviews13 table, and the name of the keywords. The for loop would error on the splitstr function and so I decided not to use it and test out a way to get the values to a sourceable medium output. Each time the num value is changed to the next iteration and the chunk play button is pressed, and after about five seconds its done, and entering the next iteration manually to complete the process would get the values.This can be merged to the Reviews 13 data of first 30 observations by row number after making an id field of both tables by rownumber first and then merging the two together. 
+Lets write this file out to csv.
+```{r}
+write.csv(first30kw, 'first30Review_keywords.csv', row.names=TRUE)
+```
+
+We could continue until we get the rest of the observations or fiddle faddle with the for loop some more. 
+```{r}
+for (num in 31:614){
+#num <- 30
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[num]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- c("the",  "and" , "for" , "have" ,"that" ,"they" ,"this" ,"you" , 
+          "not" , "but"  ,"good" ,"with")
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c(paste('documentTermCount', num, sep='_'),
+                           paste('term_to_totalDocumentTerms', num, sep='_'))
+keyValues3 <- round(keyValues3,3)
+
+keyValues4 <- as.matrix(keyValues3)
+cat(keyValues4[1,1:12],file='keyValues3.csv',append=TRUE, sep='\n',fill=TRUE)
+cat(keyValues4[2,1:12],file='keyValues3_ratios.csv',append=TRUE, sep='\n',fill=TRUE)
+}
+
+```
+
+Well, great news! The above looks like it worked and now we have the rest of our keyword data to make a matrix and then data frame out of. It took about one minute as I watched the kb file size in the file window change for each keyValues csv file in the for loop above. These are actually all the records, because they were appended to the other records. So we should have 614X12= `r614*12` observations. Lets find out.
+```{r}
+all_kws <- read.csv('keyValues3.csv', sep=',', header=FALSE, na.strings=c('',' ','NA'))
+```
+
+Ok, good, because it does say 7368 obs and 1 variable, as expected or anticipating it to.
+Now lets make this into a data frame after first making it into a matrix.
+```{r}
+all_kws1 <- all_kws$V1
+ALL_kws <- matrix(all_kws1, nrow=12,ncol=614,byrow=FALSE)
+ALL_KWs <- as.data.frame(t(ALL_kws))
+row.names(ALL_KWs) <- NULL
+colnames(ALL_KWs) <- keys
+```
+
+Now lets get the ratios for all of these reviews and keywords.
+```{r}
+all_kwrs <- read.csv('keyValues3_ratios.csv', header=FALSE, sep=',',
+                     na.strings=c('',' ','NA'))
+
+```
+
+```{r}
+all_kwrs1 <- all_kwrs$V1
+ALL_kwrs <- matrix(all_kwrs1, nrow=12,ncol=614,byrow=FALSE)
+ALL_KWRs <- as.data.frame(t(ALL_kwrs))
+row.names(ALL_KWRs) <- NULL
+colnames(ALL_KWRs) <- paste(keys,'ratios', sep='_')
+```
+
+Now lets combine the two tables together.
+```{r}
+ALL_keywords <- cbind(ALL_KWs,ALL_KWRs)
+head(ALL_keywords)
+```
+
+Super great! These for loops can be tricky. Thankfully, that worked. Lets write this out to file. The row names are not important because they are the order listed the same as the reviews listed from the Reviews13 data table.
+```{r}
+write.csv(ALL_keywords,'ALL_keywords.csv', row.names=FALSE)
+```
+
+Lets now combine this with a merge of IDs as row numbers shall we?
+```{r}
+Reviews14 <- Reviews13
+Reviews14$id <- row.names(Reviews13)
+ALL_keywords$id <- row.names(ALL_keywords)
+```
+
+Now merge by id.
+```{r}
+Reviews15 <- merge(Reviews14, ALL_keywords, by.x='id', by.y='id')
+head(Reviews15)
+```
+
+Now we need to write this out to csv to read in to other file or just to have.
+```{r}
+write.csv(Reviews15,'ReviewsCleanedWithKeywordsAndRatios.csv', row.names=FALSE)
+```
+
+This file is almost 1 Mb in file size, which actually isn't that large.

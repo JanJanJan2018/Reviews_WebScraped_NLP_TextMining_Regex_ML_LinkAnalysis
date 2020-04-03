@@ -1186,7 +1186,11 @@ wordToAllWords
 
 ```
 
-This table is the total word ratio to all words (not unique words) in each subset of ratings 1-5. 
+This table is the total word ratio to all words (not unique words) in each subset of ratings 1-5. Lets write this last table out to csv. We will use it later, and this script will be a long one, with manu objects.
+```{r}
+write.csv(wordToAllWords,'wordToAllWords.csv', row.names=TRUE)
+```
+
 
 Once we get our counts of each word in each review, we can compare it to these words and see if it appears in the document this percent of the time to aid in classifying each review into the correct rating.
 
@@ -1802,7 +1806,7 @@ Reviews13[600,]
 
 The rating is actually a 5. So, the ceiling of the mean value of the dot product of votes by ratings selected by minimum value of ratio of review to ratio of reviews in each rating using each term to total terms in the single review to each collection of reviews in each rating of 1-5.
 
-We can later add these features to each observation, make 70% a trainging set to build and train the model to predict the rating. Then us the other 30% the testing set to test the model built on the other partitioned 70% to predict the rating. We would have to run the best model above which used the mean of dot product of the votes by ratings, then the ceiling of that value which rounds up on all measures. As this algorithm was more accurate in predicting the rating.We could either do that now, or step away for a while to let it simmer and see what this data on reviews and key words looks like in a link analysis plot. Why don't we do the latter and do it.
+We can later add these features to each observation, make 70% a trainging set to build and train the model to predict the rating. Then use the other 30% the testing set to test the model built on the other partitioned 70% to predict the rating. We would have to run the best model above which used the mean of dot product of the votes by ratings, then the ceiling of that value which rounds up on all measures. As this algorithm was more accurate in predicting the rating.We could either do that now, or step away for a while to let it simmer and see what this data on reviews and key words looks like in a link analysis plot. Why don't we do the latter and do it.
 
 ***
 ***
@@ -1900,29 +1904,21 @@ row.names(Reviews13) <- NULL
 row.names(Reviews13) <- as.character(paste(row.names(Reviews13)))
 head(row.names(Reviews13))
 ```
+
+%^&%^&
 Looks like they are ordered. There are 614 reviews to extract the 12 keyword counts and ratio of words per document to total words per document. Lets try wrapping this up in a for loop.
-```{r, eval=FALSE}
-
-keys <- row.names(keys_t)
-
-strTable1 <- as.data.frame(t(as.numeric(paste(c(0,0,0,0,0,0,0,0,0,0,0,0)))))
-colnames(strTable1) <- keys
-
-str <- as.data.frame(Reviews13$userReviewOnlyContent)
-colnames(str) <- 'review'
-str$review <- as.character(paste(str$review))
-row.names(str) <- row.names(Reviews13)
-
-for (review in (str$review))
+```{r,eval=FALSE}
+str <- as.character(paste(Reviews13$userReviewOnlyContent))
+for (review in (str))
   { 
     
       s <- gsub('[!|.|,|\n|\']',' ',review,perl=TRUE)
       s <- gsub('[  ]',' ',s)
       s <- trimws(s, which=c('both'), whitespace='[\t\r\n ]')
+     # s <- strsplit(s, split=' ') #this is where the error is, outside the loop is fine
 
-      totalTerms <- length((strsplit(s, split=' ')[[1]]))
+      totalTerms <- length(strsplit(s, split=' ')[[1]])
       
-      s <- strsplit(s, split=' ')
 
       and <- str_match_all(s,' [aA][nN][dD] ')
       AND <- length(and[[1]])
@@ -1960,35 +1956,26 @@ for (review in (str$review))
       with <- str_match_all(s,' [wW][iI][tT][hH] ')
       WITH <- length(with[[1]])
 
-      values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
-      row.names(values) <- keys
+      values1 <- c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH)
 
-      keyValues <- as.data.frame(t(values))
-      keyValues2 <- keyValues/totalTerms
-      keyValues3 <- rbind(keyValues,keyValues2)
+      values2 <- values1/totalTerms
       
-  for (row in seq_along(str$review))
-    {
-  row.names(keyValues3) <- c(paste('documentTermCount',row,sep='_'),
-                           paste('term_to_totalDocumentTerms',row, sep='_'))
-                           
-      keyValues3 <- round(keyValues3,3) #data table review i
-  keyValues3
-
-      strTable1 <- rbind(keyValues3, strTable1)
-    }
+      ##cat function to save the values and work out another way to read in and combine
+      cat(values1,file="values1.csv",sep="\n",append ="TRUE",fill=TRUE)
+      cat(values2,file="values2.csv",sep="\n",append ="TRUE",fill=TRUE)
 }
 
+#loop fails at the splitstr function that was commented out. 
 ```
 
+I played around with the for loop longer than expected, and it needs more work. It isn't doing what I want it to do. I will manually get a handful of values later as needed, or move on to the vis network. I fixed the code, but this chunk won't evaluate. The script will be assumed to err until we encounter it again so as to move on to the visNetwork link analysis plots. 
 
-I played around with the for loop longer than expected, and it needs more work. It isn't doing what I want it to do. I will manually get a handful of values later as needed, or move on to the vis network. 
 
 ***
 ***
 ***
 
-Lets move onto the visNetwork. We are using the wordToAllWords and Reviews13 tables. Lets select our columns from each.
+Lets move onto the visNetwork. We are using the wordToAllWords and Reviews13 tables. Lets select our columns from each.These were both written to csv earlier as ReviewsCleanedWithKeywordsAndRatios.csv for Reviews13 and wordToAllWords.csv for that table. If you cleaned out your environment and left or shut down Rstudio then you can read in these two as their table names and test the script below.
 ```{r}
 visNodes <- Reviews13 %>% select(userRatingValue,LowAvgHighCost, businessType,weekday)
 
@@ -2014,26 +2001,34 @@ Nodes1 <- visNodes %>% select(label,title,group)
 head(Nodes1)
 ```
 
+It moves from 614 to 7368 obsrevations because of the 12 keywords and 614 reveiws which equals 7368.
 ```{r}
 Nodes2 <- merge(Nodes1, visEdges, by.x='label', by.y='rating')
+Nodes2$id <- as.factor(paste(row.names(Nodes2)))
 Nodes2$term <- Nodes2$label.y
-Nodes2$id <- row.names(Nodes2)
 Nodes3 <- Nodes2 %>% select(id,label,title,group,term)
+Nodes3$label <- as.factor(paste(Nodes3$label))
+Nodes3$term <-  as.factor(paste(Nodes3$term))         
+Nodes3$title <- as.factor(paste(Nodes3$title))
 head(Nodes3)
 ```
 
-
+visEdges only has 60 because it was 5 ratings ratios foe 12 words each.
 ```{r}
+visEdges$label <- as.factor(paste(visEdges$label))
+visEdges$rating <- as.factor(paste(visEdges$rating))
 head(visEdges)
 ```
 
-```{r}
-Edges2 <- visEdges %>% mutate(from=plyr::mapvalues(visEdges$rating, 
+Because there are only 60 fields in the edges and 7368 in the nodes, there will be errors for those values in the nodes that don't have values in the edges. But we will still have a plot. I will suppress these warnings messages within the chunk.The nodes have to have unique IDs but the edges don't.
+```{r, error=FALSE, warning=FALSE, message=FALSE}
+Edges2 <- visEdges %>% mutate(from=plyr::mapvalues(visEdges$rating,
                                                  from=Nodes3$label,to=Nodes3$id))
 Edges3 <- Edges2 %>% mutate(to=plyr::mapvalues(Edges2$label, 
                                                from=Nodes3$term, to=Nodes3$id))
+
 Edges4 <- Edges3 %>% select(from,to,label,weight)
-head(Edges4)
+head(Edges4,20)
 ```
 
 Now lets use visNetwork and igraph to plot these nodes and edges.
@@ -2217,4 +2212,717 @@ The above visual network is great for looking at the number of reviews in each r
 
 
 We should make a visual network of the keywords and the ratings to go with and maybe a couple different visualizations on our manually built best model for predicting ratings based on the ceiling of the median of the dot product of votes times ratings when there is a tie between rating votes that were voted on by which review has the minimum value of the ratio of term to total terms in the document to term to total terms by rating.
+
+I worked on the for loop outside this script and thankfully it works and it doesn't take very long for it to run. Less than two minutes. Here is that content and the new file Reviews15 we will be working with. 
+
+!!! CAUTION: !!!
+
+Make sure to **only run this once** if you already have these files or delete the keyValues3.csv and the keyValues3_ratios, as it will append to your files. When running the chunks even with eval set to FALSE, everything is ran, those header commands only work when kitting the file. It takes about a minute to load all 614 reviews into those 12 keywords with ratios. So it is ok to delete the files.
+
+```{r}
+for (num in 1:length(Reviews13$userReviewOnlyContent)){
+#num <- 30
+str1 <- as.character(paste(Reviews13$userReviewOnlyContent[num]))
+str1 <- gsub('[!|.|,|\n|\']',' ',str1,perl=TRUE)
+str1 <- gsub('[  ]',' ',str1)
+str1 <- trimws(str1, which=c('both'), whitespace='[\t\r\n ]')
+
+totalTerms <- length((strsplit(str1, split=' ')[[1]]))
+
+keys <- c("the",  "and" , "for" , "have" ,"that" ,"they" ,"this" ,"you" , 
+          "not" , "but"  ,"good" ,"with")
+
+and <- str_match_all(str1,' [aA][nN][dD] ')
+AND <- length(and[[1]])
+
+the <- str_match_all(str1,' [tT][hH][eE] ')
+THE <- length(the[[1]])
+
+for1 <- str_match_all(str1,' [fF][oO][rR] ')
+FOR1 <- length(for1[[1]])
+
+have <- str_match_all(str1,' [hH][aA][vV][eE] ')
+HAVE <- length(have[[1]])
+
+that <- str_match_all(str1,' [tT][hH][aA][tT] ')
+THAT <- length(that[[1]])
+
+they <- str_match_all(str1,' [tT][hH][eE][yY] ')
+THEY <- length(they[[1]])
+
+this <- str_match_all(str1,' [tT][hH][iI][sS] ')
+THIS <- length(this[[1]])
+
+you <- str_match_all(str1,' [yY][oO][uU] ')
+YOU <- length(you[[1]])
+
+not <- str_match_all(str1,' [nN][oO][tT] ')
+NOT <- length(not[[1]])
+
+but <- str_match_all(str1,' [bB][uU][tT] ')
+BUT <- length(but[[1]])
+
+good <- str_match_all(str1,' [gG][oO][oO][dD] ')
+GOOD <- length(good[[1]])
+
+with <- str_match_all(str1,' [wW][iI][tT][hH] ')
+WITH <- length(with[[1]])
+
+values <- as.data.frame(c(THE,AND,FOR1,HAVE,THAT,THEY,THIS,YOU,NOT,BUT,GOOD,WITH))
+row.names(values) <- keys
+
+keyValues <- as.data.frame(t(values))
+keyValues2 <- keyValues/totalTerms
+keyValues3 <- rbind(keyValues,keyValues2)
+row.names(keyValues3) <- c(paste('documentTermCount', num, sep='_'),
+                           paste('term_to_totalDocumentTerms', num, sep='_'))
+keyValues3 <- round(keyValues3,3)
+
+keyValues4 <- as.matrix(keyValues3)
+cat(keyValues4[1,1:12],file='keyValues3.csv',append=TRUE, sep='\n',fill=TRUE)
+cat(keyValues4[2,1:12],file='keyValues3_ratios.csv',append=TRUE, sep='\n',fill=TRUE)
+}
+
+```
+
+Well, great news! The above looks like it worked and now we have the rest of our keyword data to make a matrix and then data frame out of. It took about one minute as I watched the kb file size in the file window change for each keyValues csv file in the for loop above. These are actually all the records, because they were appended to the other records. So we should have 614X12= `r614*12` observations. Lets find out.
+```{r}
+all_kws <- read.csv('keyValues3.csv', sep=',', header=FALSE, na.strings=c('',' ','NA'))
+```
+
+Ok, good, because it does say 7368 obs and 1 variable, 
+(if you have more rows than this, you ran the code twice. search for keywords3.csv within Rstudio with the magnifying glass in the toolbar and see if you did, otherwise continue)
+as expected or anticipating it to.
+Now lets make this into a data frame after first making it into a matrix.
+```{r}
+all_kws1 <- all_kws$V1
+ALL_kws <- matrix(all_kws1, nrow=12,ncol=614,byrow=FALSE)
+ALL_KWs <- as.data.frame(t(ALL_kws))
+row.names(ALL_KWs) <- NULL
+colnames(ALL_KWs) <- keys
+```
+
+Now lets get the ratios for all of these reviews and keywords.
+```{r}
+all_kwrs <- read.csv('keyValues3_ratios.csv', header=FALSE, sep=',',
+                     na.strings=c('',' ','NA'))
+
+```
+
+```{r}
+all_kwrs1 <- all_kwrs$V1
+ALL_kwrs <- matrix(all_kwrs1, nrow=12,ncol=614,byrow=FALSE)
+ALL_KWRs <- as.data.frame(t(ALL_kwrs))
+row.names(ALL_KWRs) <- NULL
+colnames(ALL_KWRs) <- paste(keys,'ratios', sep='_')
+```
+
+Now lets combine the two tables together.
+```{r}
+ALL_keywords <- cbind(ALL_KWs,ALL_KWRs)
+head(ALL_keywords)
+```
+
+Super great! These for loops can be tricky. Thankfully, that worked. Lets write this out to file. The row names are not important because they are the order listed the same as the reviews listed from the Reviews13 data table.
+```{r}
+write.csv(ALL_keywords,'ALL_keywords.csv', row.names=FALSE)
+```
+
+Lets now combine this with a merge of IDs as row numbers shall we?
+```{r}
+Reviews14 <- Reviews13
+Reviews14$id <- row.names(Reviews13)
+ALL_keywords$id <- row.names(ALL_keywords)
+```
+
+Now merge by id.
+```{r}
+Reviews15 <- merge(Reviews14, ALL_keywords, by.x='id', by.y='id')
+head(Reviews15)
+```
+
+Now we need to write this out to csv to read in to other file or just to have.
+```{r}
+write.csv(Reviews15,'ReviewsCleanedWithKeywordsAndRatios.csv', row.names=FALSE)
+```
+
+This file is almost 1 Mb in file size, which actually isn't that large.
+
+***
+
+Now that we have our table with the added ratios we can now look at building different data sets with feature selection to predict any of our other targets, but most likely the rating by review. But also we can now use our best prediction model of the mean votes algorithm and other big name machine learning algorithms I have used many times. We will do that next. [Caret Cheatsheet](https://github.com/rstudio/cheatsheets/raw/master/caret.pdf) is available from the available cheatsheets in the toolbar in Rstudio in the Help menu under Cheatsheets, scroll to the 'Contributed Cheatsheets' at the bottom and select the caret cheatsheet if you would like to refresh or learn about the algorithms caret has to work with in R for machine learning on the above data set. 
+
+Before moving on to the machine learning algorithms in R, specifically the caret package. Lets make a test and train set out of this data frame, and test the features we individually select on the target variable of the rating using our best model, the ceiling of the mean of the dot product of the votes and ratings or the top votes.We will use our database Reviews15.
+If you don't have it in your environment go ahead and read it in from the ReviewsCleanedWithKeywordsAndRatios.csv file.
+```{r}
+
+Reviews15 <- read.csv('ReviewsCleanedWithKeywordsAndRatios.csv',sep=',',
+                      header=TRUE, na.strings=c('',' ','NA'))
+wordToAllWords <- read.csv('wordToAllWords.csv', sep=',', header=TRUE, na.strings=c('',' ','NA'),
+                           row.names=1)
+```
+
+Now lets see the table we will compare each review ratio of term to total terms to the term to total terms in all reviews by rating.
+```{r}
+head(wordToAllWords)
+```
+
+Now lets select our features we want to use the top model on. Since our model was based on the ratios, we will only be using the rating and those features, and from their it will create a voting system to grab the rating with the highest votes for the term to total terms per document. Make sure to read in all the packages this Rmarkdown file uses. The following will use stringr, dplyr, and tidyr or tidyverse for sure. Later we will use the caret package for Machine learning models to compare against our model.
+```{r}
+colnames(Reviews15)
+```
+
+```{r}
+ML_rating_data <- Reviews15 %>% select(userRatingValue,
+                                       the_ratios:with_ratios)
+head(ML_rating_data)
+```
+
+
+If, or when, we use the caret algorithms to make predictions with many of the available models in caret, the target variable would be the userRatingValue, and the keyword ratios (12) would be the predictors. But we aren't right at this moment and so we don't have to separate the target from the predictors just yet. We can keep it attached to compare to our model we build on the ceiling of the mean if a tie in votes for the minimum values of the review ratio to the five rating rations.
+
+Keep the rating column as an integer instead of a factor, because we need it as an integer to use the dot product on those reviews that there is a tie against the votes (the minimum value of the difference between the term to total terms in the document to the ratios of the same for all the documents in each rating). We saw earlier that there are some instances where there is a tie, but that the ceiling of the mean or the highest rating will beat out the ceiling of the median or the shortest distance (absolute value) between the reveiw ratio and rating ratios. We need to also get our data frame on ratios of total of each of these 12 words or terms to the total of all words in each corpus or file of reviews by rating in the wordToAllWords table. 
+```{r, eval=FALSE}
+colnames(wordToAllWords)[3] <- 'for_' #this is special keyword in R
+w2w <- wordToAllWords #shorten name
+MLr <- ML_rating_data #shorten the name
+
+MLr$R1_and <- rep(w2w[1,1],length(MLr$userRatingValue))
+MLr$R2_and <- rep(w2w[2,1],length(MLr$userRatingValue))
+MLr$R3_and <- rep(w2w[3,1],length(MLr$userRatingValue))
+MLr$R4_and <- rep(w2w[4,1],length(MLr$userRatingValue))
+MLr$R5_and <- rep(w2w[5,1],length(MLr$userRatingValue))
+
+MLr$R1_but <- rep(w2w[1,2],length(MLr$userRatingValue))
+MLr$R2_but <- rep(w2w[2,2],length(MLr$userRatingValue))
+MLr$R3_but <- rep(w2w[3,2],length(MLr$userRatingValue))
+MLr$R4_but <- rep(w2w[4,2],length(MLr$userRatingValue))
+MLr$R5_but <- rep(w2w[5,2],length(MLr$userRatingValue))
+
+MLr$R1_for <- rep(w2w[1,3],length(MLr$userRatingValue))
+MLr$R2_for <- rep(w2w[2,3],length(MLr$userRatingValue))
+MLr$R3_for <- rep(w2w[3,3],length(MLr$userRatingValue))
+MLr$R4_for <- rep(w2w[4,3],length(MLr$userRatingValue))
+MLr$R5_for <- rep(w2w[5,3],length(MLr$userRatingValue))
+
+MLr$R1_good <- rep(w2w[1,4],length(MLr$userRatingValue))
+MLr$R2_good <- rep(w2w[2,4],length(MLr$userRatingValue))
+MLr$R3_good <- rep(w2w[3,4],length(MLr$userRatingValue))
+MLr$R4_good <- rep(w2w[4,4],length(MLr$userRatingValue))
+MLr$R5_good <- rep(w2w[5,4],length(MLr$userRatingValue))
+
+MLr$R1_have <- rep(w2w[1,5],length(MLr$userRatingValue))
+MLr$R2_have <- rep(w2w[2,5],length(MLr$userRatingValue))
+MLr$R3_have <- rep(w2w[3,5],length(MLr$userRatingValue))
+MLr$R4_have <- rep(w2w[4,5],length(MLr$userRatingValue))
+MLr$R5_have <- rep(w2w[5,5],length(MLr$userRatingValue))
+
+MLr$R1_not <- rep(w2w[1,6],length(MLr$userRatingValue))
+MLr$R2_not <- rep(w2w[2,6],length(MLr$userRatingValue))
+MLr$R3_not <- rep(w2w[3,6],length(MLr$userRatingValue))
+MLr$R4_not <- rep(w2w[4,6],length(MLr$userRatingValue))
+MLr$R5_not <- rep(w2w[5,6],length(MLr$userRatingValue))
+
+MLr$R1_that <- rep(w2w[1,7],length(MLr$userRatingValue))
+MLr$R2_that <- rep(w2w[2,7],length(MLr$userRatingValue))
+MLr$R3_that <- rep(w2w[3,7],length(MLr$userRatingValue))
+MLr$R4_that <- rep(w2w[4,7],length(MLr$userRatingValue))
+MLr$R5_that <- rep(w2w[5,7],length(MLr$userRatingValue))
+
+MLr$R1_the <- rep(w2w[1,8],length(MLr$userRatingValue))
+MLr$R2_the <- rep(w2w[2,8],length(MLr$userRatingValue))
+MLr$R3_the <- rep(w2w[3,8],length(MLr$userRatingValue))
+MLr$R4_the <- rep(w2w[4,8],length(MLr$userRatingValue))
+MLr$R5_the <- rep(w2w[5,8],length(MLr$userRatingValue))
+
+MLr$R1_they <- rep(w2w[1,9],length(MLr$userRatingValue))
+MLr$R2_they <- rep(w2w[2,9],length(MLr$userRatingValue))
+MLr$R3_they <- rep(w2w[3,9],length(MLr$userRatingValue))
+MLr$R4_they <- rep(w2w[4,9],length(MLr$userRatingValue))
+MLr$R5_they <- rep(w2w[5,9],length(MLr$userRatingValue))
+
+MLr$R1_this <- rep(w2w[1,10],length(MLr$userRatingValue))
+MLr$R2_this <- rep(w2w[2,10],length(MLr$userRatingValue))
+MLr$R3_this <- rep(w2w[3,10],length(MLr$userRatingValue))
+MLr$R4_this <- rep(w2w[4,10],length(MLr$userRatingValue))
+MLr$R5_this <- rep(w2w[5,10],length(MLr$userRatingValue))
+
+MLr$R1_with <- rep(w2w[1,11],length(MLr$userRatingValue))
+MLr$R2_with <- rep(w2w[2,11],length(MLr$userRatingValue))
+MLr$R3_with <- rep(w2w[3,11],length(MLr$userRatingValue))
+MLr$R4_with <- rep(w2w[4,11],length(MLr$userRatingValue))
+MLr$R5_with <- rep(w2w[5,11],length(MLr$userRatingValue))
+
+MLr$R1_you <- rep(w2w[1,12],length(MLr$userRatingValue))
+MLr$R2_you <- rep(w2w[2,12],length(MLr$userRatingValue))
+MLr$R3_you <- rep(w2w[3,12],length(MLr$userRatingValue))
+MLr$R4_you <- rep(w2w[4,12],length(MLr$userRatingValue))
+MLr$R5_you <- rep(w2w[5,12],length(MLr$userRatingValue))
+
+MLr$and_diff1 <- MLr$R1_and-MLr$and_ratios
+MLr$and_diff2 <- MLr$R2_and-MLr$and_ratios
+MLr$and_diff3 <- MLr$R3_and-MLr$and_ratios
+MLr$and_diff4 <- MLr$R4_and-MLr$and_ratios
+MLr$and_diff5 <- MLr$R5_and-MLr$and_ratios
+
+MLr$but_diff1 <- MLr$R1_but-MLr$but_ratios
+MLr$but_diff2 <- MLr$R2_but-MLr$but_ratios
+MLr$but_diff3 <- MLr$R3_but-MLr$but_ratios
+MLr$but_diff4 <- MLr$R4_but-MLr$but_ratios
+MLr$but_diff5 <- MLr$R5_but-MLr$but_ratios
+
+MLr$for_diff1 <- MLr$R1_for-MLr$for_ratios 
+MLr$for_diff2 <- MLr$R2_for-MLr$for_ratios 
+MLr$for_diff3 <- MLr$R3_for-MLr$for_ratios 
+MLr$for_diff4 <- MLr$R4_for-MLr$for_ratios 
+MLr$for_diff5 <- MLr$R5_for-MLr$for_ratios 
+
+MLr$good_diff1 <- MLr$R1_good-MLr$good_ratios
+MLr$good_diff2 <- MLr$R2_good-MLr$good_ratios
+MLr$good_diff3 <- MLr$R3_good-MLr$good_ratios
+MLr$good_diff4 <- MLr$R4_good-MLr$good_ratios
+MLr$good_diff5 <- MLr$R5_good-MLr$good_ratios
+
+MLr$have_diff1 <- MLr$R1_have-MLr$have_ratios
+MLr$have_diff2 <- MLr$R2_have-MLr$have_ratios
+MLr$have_diff3 <- MLr$R3_have-MLr$have_ratios
+MLr$have_diff4 <- MLr$R4_have-MLr$have_ratios
+MLr$have_diff5 <- MLr$R5_have-MLr$have_ratios
+
+MLr$not_diff1 <- MLr$R1_not-MLr$not_ratios
+MLr$not_diff2 <- MLr$R2_not-MLr$not_ratios
+MLr$not_diff3 <- MLr$R3_not-MLr$not_ratios
+MLr$not_diff4 <- MLr$R4_not-MLr$not_ratios
+MLr$not_diff5 <- MLr$R5_not-MLr$not_ratios
+
+MLr$that_diff1 <- MLr$R1_that-MLr$that_ratios
+MLr$that_diff2 <- MLr$R2_that-MLr$that_ratios
+MLr$that_diff3 <- MLr$R3_that-MLr$that_ratios
+MLr$that_diff4 <- MLr$R4_that-MLr$that_ratios
+MLr$that_diff5 <- MLr$R5_that-MLr$that_ratios
+
+MLr$the_diff1 <- MLr$R1_the-MLr$the_ratios
+MLr$the_diff2 <- MLr$R2_the-MLr$the_ratios
+MLr$the_diff3 <- MLr$R3_the-MLr$the_ratios
+MLr$the_diff4 <- MLr$R4_the-MLr$the_ratios
+MLr$the_diff5 <- MLr$R5_the-MLr$the_ratios
+
+MLr$they_diff1 <- MLr$R1_they-MLr$they_ratios
+MLr$they_diff2 <- MLr$R2_they-MLr$they_ratios
+MLr$they_diff3 <- MLr$R3_they-MLr$they_ratios
+MLr$they_diff4 <- MLr$R4_they-MLr$they_ratios
+MLr$they_diff5 <- MLr$R5_they-MLr$they_ratios
+
+MLr$this_diff1 <- MLr$R1_this-MLr$this_ratios
+MLr$this_diff2 <- MLr$R2_this-MLr$this_ratios
+MLr$this_diff3 <- MLr$R3_this-MLr$this_ratios
+MLr$this_diff4 <- MLr$R4_this-MLr$this_ratios
+MLr$this_diff5 <- MLr$R5_this-MLr$this_ratios
+
+MLr$with_diff1 <- MLr$R1_with-MLr$with_ratios
+MLr$with_diff2 <- MLr$R2_with-MLr$with_ratios
+MLr$with_diff3 <- MLr$R3_with-MLr$with_ratios
+MLr$with_diff4 <- MLr$R4_with-MLr$with_ratios
+MLr$with_diff5 <- MLr$R5_with-MLr$with_ratios
+
+MLr$you_diff1 <- MLr$R1_you-MLr$you_ratios
+MLr$you_diff2 <- MLr$R2_you-MLr$you_ratios
+MLr$you_diff3 <- MLr$R3_you-MLr$you_ratios
+MLr$you_diff4 <- MLr$R4_you-MLr$you_ratios
+MLr$you_diff5 <- MLr$R5_you-MLr$you_ratios
+
+
+
+MLr$andMin <- apply(MLr[74:78],1, min)
+MLr$andvote <- ifelse(MLr$R1_and==MLr$andMin,
+                    1, 
+                    ifelse(MLr$R2_and==MLr$andMin,
+                           2,
+                           ifelse(MLr$R3_and==MLr$andMin,
+                                  3,
+                                  ifelse(MLr$R4_and==MLr$andMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$butMin <- apply(MLr[79:83],1, min)
+MLr$butvote <- ifelse(MLr$R1_but==MLr$butMin,
+                    1, 
+                    ifelse(MLr$R2_but==MLr$butMin,
+                           2,
+                           ifelse(MLr$R3_but==MLr$butMin,
+                                  3,
+                                  ifelse(MLr$R4_but==MLr$butMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$forMin <- apply(MLr[84:88],1, min)
+MLr$forvote <- ifelse(MLr$R1_for==MLr$forMin,
+                    1, 
+                    ifelse(MLr$R2_for==MLr$forMin,
+                           2,
+                           ifelse(MLr$R3_for==MLr$forMin,
+                                  3,
+                                  ifelse(MLr$R4_for==MLr$forMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$goodMin <- apply(MLr[89:93],1, min)
+MLr$goodvote <- ifelse(MLr$R1_good==MLr$goodMin,
+                    1, 
+                    ifelse(MLr$R2_good==MLr$goodMin,
+                           2,
+                           ifelse(MLr$R3_good==MLr$goodMin,
+                                  3,
+                                  ifelse(MLr$R4_good==MLr$goodMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$haveMin <- apply(MLr[94:98],1, min)
+MLr$havevote <- ifelse(MLr$R1_have==MLr$haveMin,
+                    1, 
+                    ifelse(MLr$R2_have==MLr$haveMin,
+                           2,
+                           ifelse(MLr$R3_have==MLr$haveMin,
+                                  3,
+                                  ifelse(MLr$R4_have==MLr$haveMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$notMin <- apply(MLr[99:103],1, min)
+MLr$notvote <- ifelse(MLr$R1_not==MLr$notMin,
+                    1, 
+                    ifelse(MLr$R2_not==MLr$notMin,
+                           2,
+                           ifelse(MLr$R3_not==MLr$notMin,
+                                  3,
+                                  ifelse(MLr$R4_not==MLr$notMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$thatMin <- apply(MLr[104:108],1, min)
+MLr$thatvote <- ifelse(MLr$R1_that==MLr$thatMin,
+                    1, 
+                    ifelse(MLr$R2_that==MLr$thatMin,
+                           2,
+                           ifelse(MLr$R3_that==MLr$thatMin,
+                                  3,
+                                  ifelse(MLr$R4_that==MLr$thatMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$theMin <- apply(MLr[109:113],1, min)
+MLr$thevote <- ifelse(MLr$R1_the==MLr$theMin,
+                    1, 
+                    ifelse(MLr$R2_the==MLr$theMin,
+                           2,
+                           ifelse(MLr$R3_the==MLr$theMin,
+                                  3,
+                                  ifelse(MLr$R4_the==MLr$theMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$theyMin <- apply(MLr[114:118],1, min)
+MLr$theyvote <- ifelse(MLr$R1_they==MLr$theyMin,
+                    1, 
+                    ifelse(MLr$R2_they==MLr$theyMin,
+                           2,
+                           ifelse(MLr$R3_they==MLr$theyMin,
+                                  3,
+                                  ifelse(MLr$R4_they==MLr$theyMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$thisMin <- apply(MLr[119:123],1, min)
+MLr$thisvote <- ifelse(MLr$R1_this==MLr$thisMin,
+                    1, 
+                    ifelse(MLr$R2_this==MLr$thisMin,
+                           2,
+                           ifelse(MLr$R3_this==MLr$thisMin,
+                                  3,
+                                  ifelse(MLr$R4_this==MLr$thisMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$withMin <- apply(MLr[124:128],1, min)
+MLr$withvote <- ifelse(MLr$R1_with==MLr$withMin,
+                    1, 
+                    ifelse(MLr$R2_with==MLr$withMin,
+                           2,
+                           ifelse(MLr$R3_with==MLr$withMin,
+                                  3,
+                                  ifelse(MLr$R4_with==MLr$withMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+MLr$youMin <- apply(MLr[129:133],1, min)
+MLr$youvote <- ifelse(MLr$R1_you==MLr$youMin,
+                    1, 
+                    ifelse(MLr$R2_you==MLr$youMin,
+                           2,
+                           ifelse(MLr$R3_you==MLr$youMin,
+                                  3,
+                                  ifelse(MLr$R4_you==MLr$youMin,
+                                         4,
+                                         5)
+                                  )
+                           )
+                    )
+
+
+```
+
+```{r}
+bestVote <- MLr %>% select(andvote, 
+      butvote, forvote, 
+      goodvote, havevote,
+      notvote,  thatvote,  thevote,theyvote,
+      thisvote,withvote,
+      youvote)
+      
+bestVote$andvote <- as.factor(paste(bestVote$andvote)) 
+bestVote$butvote <- as.factor(paste(bestVote$butvote)) 
+bestVote$forvote <- as.factor(paste(bestVote$forvote)) 
+bestVote$goodvote <- as.factor(paste(bestVote$goodvote)) 
+bestVote$havevote <- as.factor(paste(bestVote$havevote))
+bestVote$notvote <- as.factor(paste(bestVote$notvote))  
+bestVote$thatvote <- as.factor(paste(bestVote$thatvote))                                  
+bestVote$thevote <- as.factor(paste(bestVote$thevote))
+bestVote$theyvote <- as.factor(paste(bestVote$theyvote))
+bestVote$thisvote <- as.factor(paste(bestVote$thisvote))
+bestVote$withvote <- as.factor(paste(bestVote$withvote))
+bestVote$youvote <- as.factor(paste(bestVote$youvote))
+
+bestVote$counts1 <- 0
+bestVote$counts2 <- 0
+bestVote$counts3 <- 0
+bestVote$counts4 <- 0
+bestVote$counts5 <- 0
+
+a5 <- grep('5',bestVote$andvote)
+a4 <- grep('4', bestVote$andvote)
+a3 <- grep('3',bestVote$andvote)
+a2 <- grep('2',bestVote$andvote)
+a1 <- grep('1',bestVote$andvote)
+
+b5 <- grep('5',bestVote$butvote)
+b4 <- grep('4', bestVote$butvote)
+b3 <- grep('3',bestVote$butvote)
+b2 <- grep('2',bestVote$butvote)
+b1 <- grep('1',bestVote$butvote)
+
+c5 <- grep('5',bestVote$forvote)
+c4 <- grep('4', bestVote$forvote)
+c3 <- grep('3',bestVote$forvote)
+c2 <- grep('2',bestVote$forvote)
+c1 <- grep('1',bestVote$forvote)
+
+d5 <- grep('5',bestVote$goodvote)
+d4 <- grep('4', bestVote$goodvote)
+d3 <- grep('3',bestVote$goodvote)
+d2 <- grep('2',bestVote$goodvote)
+d1 <- grep('1',bestVote$goodvote)
+
+e5 <- grep('5',bestVote$havevote)
+e4 <- grep('4', bestVote$havevote)
+e3 <- grep('3',bestVote$havevote)
+e2 <- grep('2',bestVote$havevote)
+e1 <- grep('1',bestVote$havevote)
+
+f5 <- grep('5',bestVote$notvote)
+f4 <- grep('4', bestVote$notvote)
+f3 <- grep('3',bestVote$notvote)
+f2 <- grep('2',bestVote$notvote)
+f1 <- grep('1',bestVote$notvote)
+
+g5 <- grep('5',bestVote$thatvote)
+g4 <- grep('4', bestVote$thatvote)
+g3 <- grep('3',bestVote$thatvote)
+g2 <- grep('2',bestVote$thatvote)
+g1 <- grep('1',bestVote$thatvote)
+
+h5 <- grep('5',bestVote$thevote)
+h4 <- grep('4', bestVote$thevote)
+h3 <- grep('3',bestVote$thevote)
+h2 <- grep('2',bestVote$thevote)
+h1 <- grep('1',bestVote$thevote)
+
+i5 <- grep('5',bestVote$theyvote)
+i4 <- grep('4', bestVote$theyvote)
+i3 <- grep('3',bestVote$theyvote)
+i2 <- grep('2',bestVote$theyvote)
+i1 <- grep('1',bestVote$theyvote)
+
+j5 <- grep('5',bestVote$thisvote)
+j4 <- grep('4', bestVote$thisvote)
+j3 <- grep('3',bestVote$thisvote)
+j2 <- grep('2',bestVote$thisvote)
+j1 <- grep('1',bestVote$thisvote)
+
+k5 <- grep('5',bestVote$withvote)
+k4 <- grep('4', bestVote$withvote)
+k3 <- grep('3',bestVote$withvote)
+k2 <- grep('2',bestVote$withvote)
+k1 <- grep('1',bestVote$withvote)
+
+l5 <- grep('5',bestVote$youvote)
+l4 <- grep('4', bestVote$youvote)
+l3 <- grep('3',bestVote$youvote)
+l2 <- grep('2',bestVote$youvote)
+l1 <- grep('1',bestVote$youvote)
+
+bestVote$counts1[l1] <- bestVote$counts1[l1]+ 1
+bestVote$counts1[k1] <- bestVote$counts1[k1]+ 1
+bestVote$counts1[j1] <- bestVote$counts1[j1]+ 1
+bestVote$counts1[i1] <- bestVote$counts1[i1]+ 1
+bestVote$counts1[h1] <- bestVote$counts1[h1]+ 1
+bestVote$counts1[g1] <- bestVote$counts1[g1]+ 1
+bestVote$counts1[f1] <- bestVote$counts1[f1]+ 1
+bestVote$counts1[e1] <- bestVote$counts1[e1]+ 1
+bestVote$counts1[d1] <- bestVote$counts1[d1]+ 1
+bestVote$counts1[c1] <- bestVote$counts1[c1]+ 1
+bestVote$counts1[b1] <- bestVote$counts1[b1]+ 1
+bestVote$counts1[a1] <- bestVote$counts1[a1]+ 1
+
+bestVote$counts2[l2]  <- bestVote$counts2[l2] + 1
+bestVote$counts2[k2]  <- bestVote$counts2[k2] + 1
+bestVote$counts2[j2]  <- bestVote$counts2[j2] + 1
+bestVote$counts2[i2]  <- bestVote$counts2[i2] + 1
+bestVote$counts2[h2]  <- bestVote$counts2[h2] + 1
+bestVote$counts2[g2]  <- bestVote$counts2[g2] + 1
+bestVote$counts2[f2]  <- bestVote$counts2[f2] + 1
+bestVote$counts2[e2]  <- bestVote$counts2[e2] + 1
+bestVote$counts2[d2]  <- bestVote$counts2[d2] + 1
+bestVote$counts2[c2]  <- bestVote$counts2[c2] + 1
+bestVote$counts2[b2]  <- bestVote$counts2[b2] + 1
+bestVote$counts2[a2]  <- bestVote$counts2[a2] + 1
+
+bestVote$counts3[l3]  <- bestVote$counts3[l3] + 1
+bestVote$counts3[k3]  <- bestVote$counts3[k3] + 1
+bestVote$counts3[j3]  <- bestVote$counts3[j3] + 1
+bestVote$counts3[i3]  <- bestVote$counts3[i3] + 1
+bestVote$counts3[h3]  <- bestVote$counts3[h3] + 1
+bestVote$counts3[g3]  <- bestVote$counts3[g3] + 1
+bestVote$counts3[f3]  <- bestVote$counts3[f3] + 1
+bestVote$counts3[e3]  <- bestVote$counts3[e3] + 1
+bestVote$counts3[d3]  <- bestVote$counts3[d3] + 1
+bestVote$counts3[c3]  <- bestVote$counts3[c3] + 1
+bestVote$counts3[b3]  <- bestVote$counts3[b3] + 1
+bestVote$counts3[a3]  <- bestVote$counts3[a3] + 1
+
+bestVote$counts4[l4]  <- bestVote$counts4[l4] + 1
+bestVote$counts4[k4]  <- bestVote$counts4[k4] + 1
+bestVote$counts4[j4]  <- bestVote$counts4[j4] + 1
+bestVote$counts4[i4]  <- bestVote$counts4[i4] + 1
+bestVote$counts4[h4]  <- bestVote$counts4[h4] + 1
+bestVote$counts4[g4]  <- bestVote$counts4[g4] + 1
+bestVote$counts4[f4]  <- bestVote$counts4[f4] + 1
+bestVote$counts4[e4]  <- bestVote$counts4[e4] + 1
+bestVote$counts4[d4]  <- bestVote$counts4[d4] + 1
+bestVote$counts4[c4]  <- bestVote$counts4[c4] + 1
+bestVote$counts4[b4]  <- bestVote$counts4[b4] + 1
+bestVote$counts4[a4]  <- bestVote$counts4[a4] + 1
+
+bestVote$counts5[l5]  <- bestVote$counts5[l5] + 1
+bestVote$counts5[k5]  <- bestVote$counts5[k5] + 1
+bestVote$counts5[j5]  <- bestVote$counts5[j5] + 1
+bestVote$counts5[i5]  <- bestVote$counts5[i5] + 1
+bestVote$counts5[h5]  <- bestVote$counts5[h5] + 1
+bestVote$counts5[g5]  <- bestVote$counts5[g5] + 1
+bestVote$counts5[f5]  <- bestVote$counts5[f5] + 1
+bestVote$counts5[e5]  <- bestVote$counts5[e5] + 1
+bestVote$counts5[d5]  <- bestVote$counts5[d5] + 1
+bestVote$counts5[c5]  <- bestVote$counts5[c5] + 1
+bestVote$counts5[b5]  <- bestVote$counts5[b5] + 1
+bestVote$counts5[a5]  <- bestVote$counts5[a5] + 1
+
+
+bestVote$maxVote <- apply(bestVote[13:17],1,max)
+
+mv <- bestVote$maxVote
+ct1 <- bestVote$counts1
+ct2 <- bestVote$counts2
+ct3 <- bestVote$counts3
+ct4 <- bestVote$counts4
+ct5 <- bestVote$counts5
+
+
+bestVote$votedRating <- ifelse(mv==ct1, 1, 
+                        ifelse(mv==ct2, 2,
+                        ifelse(mv==ct3, 3,
+                        ifelse(mv==ct4, 4, 5))))
+
+bestVote$Rating <- ifelse(mv==ct1 & (mv==ct2|mv==ct3|mv==ct4|mv==ct5),'tie',
+                     ifelse(mv==ct1,1, 
+                           ifelse(mv==ct2 & (mv==ct3|mv==ct4|mv==ct5),'tie',
+                     ifelse(mv==ct2, 2,
+                           ifelse(mv==ct3 &(mv==ct4|mv==ct5),'tie', 
+                           ifelse(mv==ct3, 3,
+                           ifelse(mv==ct4 & mv==ct5, 'tie',
+                           ifelse(mv==ct4, 4,5
+                           )))))))
+                          )
+bestVote$finalPrediction <- ifelse(bestVote$Rating=='tie', 
+                     ifelse(ceiling((c(ct1,ct2,ct3,ct4,ct5)*c(1,2,3,4,5))/5) > 5,
+                     5, ceiling((c(ct1,ct2,ct3,ct4,ct5)*c(1,2,3,4,5))/5)), 
+                     bestVote$votedRating )
+
+```
+
+
+Now that we have our final prediction with this algorithm. Lets attach these two tables together and rearrange the columns.
+```{r}
+MLr2 <- cbind(MLr, bestVote)
+MLr3 <- MLr2[,c(2:178,1)]
+MLr3$CorrectPrediction <- ifelse(MLr3$finalPrediction==MLr3$userRatingValue,
+                                 1,0)
+MLr3$finalPrediction <- as.factor(paste(MLr3$finalPrediction))
+MLr3$userRatingValue <- paste('rating ', MLr3$userRatingValue,sep='')
+Accuracy <- sum(MLr3$CorrectPrediction)/length(MLr3$CorrectPrediction)
+Accuracy
+```
+
+The first bunch of reviews seem to be very accurate, but then more reviews get less accurate. 
+```{r}
+MLr3[1:20,175:179]
+```
+
+This was a good approach to building a model from the ground up and developing algorithms that seem like they could be good models to make predictions with. This was a straight algorithm model as in a function you put something in and get an answer out. The caret package has other more heavily used and industry related models tht are used frequently and can be tune. We will look at those later.
+
+Lets write this table out to csv.
+```{r}
+write.csv(MLr3, 'ML_Reviews614_resultsTable.csv', row.names=FALSE)
+```
 
