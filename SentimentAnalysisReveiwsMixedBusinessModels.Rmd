@@ -564,8 +564,8 @@ rating5 <- subset(Lemma, Lemma$rating==5)
 
 ```
 
-Lets create a directory for each rating.
-```{r, error=FALSE, message=FALSE, warning=FALSE}
+Lets create a directory for each rating.Erase the eval=FALsE, if you want to run this script. I already have the files.
+```{r, error=FALSE, message=FALSE, warning=FALSE,eval=FALSE}
 dir.create('./rating1')
 dir.create('./rating2')
 dir.create('./rating3')
@@ -2382,11 +2382,13 @@ head(ML_rating_data)
 If, or when, we use the caret algorithms to make predictions with many of the available models in caret, the target variable would be the userRatingValue, and the keyword ratios (12) would be the predictors. But we aren't right at this moment and so we don't have to separate the target from the predictors just yet. We can keep it attached to compare to our model we build on the ceiling of the mean if a tie in votes for the minimum values of the review ratio to the five rating rations.
 
 Keep the rating column as an integer instead of a factor, because we need it as an integer to use the dot product on those reviews that there is a tie against the votes (the minimum value of the difference between the term to total terms in the document to the ratios of the same for all the documents in each rating). We saw earlier that there are some instances where there is a tie, but that the ceiling of the mean or the highest rating will beat out the ceiling of the median or the shortest distance (absolute value) between the reveiw ratio and rating ratios. We need to also get our data frame on ratios of total of each of these 12 words or terms to the total of all words in each corpus or file of reviews by rating in the wordToAllWords table. 
-```{r, eval=FALSE}
+```{r}
 colnames(wordToAllWords)[3] <- 'for_' #this is special keyword in R
 w2w <- wordToAllWords #shorten name
 MLr <- ML_rating_data #shorten the name
+```
 
+```{r}
 MLr$R1_and <- rep(w2w[1,1],length(MLr$userRatingValue))
 MLr$R2_and <- rep(w2w[2,1],length(MLr$userRatingValue))
 MLr$R3_and <- rep(w2w[3,1],length(MLr$userRatingValue))
@@ -2926,3 +2928,231 @@ Lets write this table out to csv.
 write.csv(MLr3, 'ML_Reviews614_resultsTable.csv', row.names=FALSE)
 ```
 
+
+Lets look at those values that the correct prediction was false.
+```{r}
+FalsePredictions <- subset(MLr3, MLr3$CorrectPrediction==0)
+head(FalsePredictions[,175:179],30)
+```
+Many times the voted rating was not the rating even if it wasn't a tie. The 2-4 ratings were most of the incorrect predictions and the rating as being either a 5 or a 1 were more 50/50 probably because their ratios of term to total terms were very close. Some tuning that could be done would be to select different keywords, see if there is a difference between type of business or cost of service or goods. We left in these words of which most are included in stopwords like by,my,has,have,etc.that are personal pronouns or  of the text mining tm package. 
+```{r}
+#library(tm)
+stop <- stopwords()
+stop
+```
+The above are the stopwords that are eliminated within text cleaning and preprocessing before running or retrieving a document term matrix for an observation such as a review.
+Now lets look at are keywords.
+```{r}
+keywordsUsed <- colnames(wordToAllWords)
+keywordsUsed
+```
+The above shows our keywords, and note that for is for_ because it errors in R as it is a programming keyword so it was altered in the column name with an appended underscore character, but the search for it as a character or factor is 'for' not 'for_'. We actually see that all 12 of our stopwords are keywords. We briefly explained that this is because in grammar and composition to write a persuasive stories many connections have to be made with the use of pronouns and actions and states of being and descriptors. These were used as features by count to see if they added any value to predicting a review. We do see that these stop words are used a lot for extreme ends of the rating scale as a 1 for the lowest and 5 for the highest review rating.
+
+Lets get a count of each rating by incorrect classification.
+```{r}
+userRatings <- FalsePredictions %>% group_by(userRatingValue) %>% count(finalPrediction)
+userRatings
+```
+We can see from the userRatingValue and the final prediction, that there were 85 instances
+where this model couldn't distinguish between a 1 or 5 rating based on the keywords (mostly stopwords). But also those ratings that were 4s were actually classified the most incorrectly as a 5 because some people don't readily give 5s as others. Also the actual 2s that were classified incorrectly were scaled up to 5s in the error, the same with the 3s. The gray areas were in user ratings of 2-4, where few were classified as a value in a 2-4 that was incorrect. If we instead said to classify any 2-4 as in the range of 2-4 without penalizing the exact value, then the prediction accuracy would be better. But people have their own reasons for giving 2-4s in ratings. Like they had better or there was an absolute worst experience the company still doesn't meet because he or she knows it could be worse and it could be better. Companies are supposed to use this to improve or adjust needs of consumers. But at the same time some users are just upset with the cost or time wasted or spent when other options they know of were or are better.
+
+Lets look at those predictions with a tie.
+```{r}
+ties <- subset(MLr3, MLr3$Rating=='tie')
+ties[,175:179]
+```
+There weren't a lot of ties on votes for the minimum difference of review to all reviews by ratios of term to total terms.
+```{r}
+tieGroups <- ties %>% group_by(userRatingValue) %>% count(finalPrediction)
+tieGroups
+```
+
+Note that these tie ratings are both correct and incorrect. From the above grouped information of counts of user ratings by final predictions all the 5s were misclassified or predicted to be in the gray area of 2-4 and more of the 1s were classified correctly except for one review in the middle gray area. None of the 2s are in our list of ties but many of the gray area 2-4s were classified into the gray area of incorrect 2-4s such as the 4s and 3s.
+
+We could use a link analysis to see how these results compared with the final predicted value and actual rating value as groups. With the nodes as the user rating, and edges as the final prediction. We should also add in one of either the business type or the cost.
+First lets combine the Reviews15 table with the MLr3 table of only the results.
+```{r}
+MLr4 <- MLr3 %>% select(maxVote:CorrectPrediction)
+MLr4$actualRatingValue <- MLr4$userRatingValue
+MLr5 <- MLr4 %>% select(-userRatingValue)
+Reviews15_results <- cbind(Reviews15, MLr5)
+colnames(Reviews15_results)
+```
+Lets keep the ratios because this table minus results (and the review content columns) just added will be useful when running the caret algorithms. For now, lets write this out to csv to easily read in later instead of running whatever chunks preceded this table to get it.
+```{r}
+write.csv(Reviews15_results, 'Reviews15_results.csv', row.names=FALSE)
+```
+
+Now lets use visNetwork to group by CorrectPrediction and map the actualRatingValue to the predicted values as well as add a hovering feature as the title column in our nodes table of the businessType. We have to pick a width for the weighted arrows, or else there won't be any edges. Lets pick the not_ratios. 
+```{r}
+network <- Reviews15_results %>% select(businessType,
+                                        finalPrediction:actualRatingValue, not,
+                                        not_ratios)
+
+network$finalPrediction <- paste('predicted',network$finalPrediction,sep=' ')
+network$CorrectPrediction <- gsub(1,'TRUE', network$CorrectPrediction)
+network$CorrectPrediction <- gsub(0,'FALSE', network$CorrectPrediction)
+head(network,20)
+```
+
+The nodes table will include all of the above except the not_ratios.
+```{r,error=FALSE,message=FALSE, warning=FALSE}
+nodes <- network
+nodes$id <- row.names(nodes)
+nodes$title <- nodes$businessType
+nodes$label <- nodes$actualRatingValue
+nodes$group <- nodes$CorrectPrediction
+nodes1 <- nodes %>% select(id, label, title,group,finalPrediction)
+head(nodes1,10)
+```
+
+The edges will have the finalPrediction and actualRatingValue columns.
+```{r,error=FALSE,message=FALSE, warning=FALSE}
+edges <- network %>% select(finalPrediction,actualRatingValue,not,not_ratios)
+edges$label <- edges$finalPrediction
+edges$weight <- edges$not_ratios
+edges$width <- edges$not
+edges1 <- edges %>% mutate(from = plyr::mapvalues(edges$actualRatingValue,
+                                                  from = nodes$label, 
+                                                  to = nodes$id)
+                           )
+edges2 <- edges1 %>% mutate(to = plyr::mapvalues(edges$finalPrediction,
+                                                   from = nodes$finalPrediction,
+                                                   to = nodes$id)
+                            )
+edges3 <- edges2 %>% select(from,to,label,width,weight)
+head(edges3,10)
+```
+
+Lets see the link analysis visualization.
+```{r}
+visNetwork(nodes=nodes1, edges=edges3, main='Grouped Predictions of True or False Ratings') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=TRUE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout() %>%
+  visLegend
+```
+
+The above shows a visual network that looks mostly half and half by true versus false predicted rating values.None of the edges show except for that tiny cluster above, that shows the predicted ratings.
+
+
+Lets group by business type now and map the actual to correctly predicted
+```{r,error=FALSE,message=FALSE, warning=FALSE}
+nodes <- network
+nodes$id <- row.names(nodes)
+nodes$group <- nodes$businessType
+nodes$label <- nodes$actualRatingValue
+nodes$title <- nodes$CorrectPrediction
+nodes1 <- nodes %>% select(id, label, title,group,finalPrediction)
+head(nodes1,10)
+```
+
+The edges will have the finalPrediction and actualRatingValue columns.
+```{r,error=FALSE,message=FALSE, warning=FALSE}
+edges <- network %>% select(finalPrediction,actualRatingValue,not,not_ratios)
+edges$label <- edges$finalPrediction
+edges$weight <- edges$not_ratios
+edges$width <- edges$not
+edges1 <- edges %>% mutate(from = plyr::mapvalues(edges$actualRatingValue,
+                                                  from = nodes$label, 
+                                                  to = nodes$id)
+                           )
+edges2 <- edges1 %>% mutate(to = plyr::mapvalues(edges$finalPrediction,
+                                                   from = nodes$finalPrediction,
+                                                   to = nodes$id)
+                            )
+edges3 <- edges2 %>% select(from,to,label,width, weight)
+head(edges3,10)
+```
+
+Lets see the link analysis visualization.
+```{r}
+visNetwork(nodes=nodes1, edges=edges3, main='Grouped Predictions of Business Type Ratings with True or False and Actual Rating') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=TRUE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout() %>%
+  visLegend
+```
+
+
+Lets group by business type now and map the business type to the prediction.
+```{r,error=FALSE,message=FALSE, warning=FALSE}
+nodes <- network
+nodes$id <- row.names(nodes)
+nodes$group <- nodes$businessType
+nodes$label <- nodes$businessType
+nodes$title <- nodes$CorrectPrediction
+nodes1 <- nodes %>% select(id, label,group,finalPrediction, title)
+head(nodes1,10)
+```
+
+```{r,error=FALSE,message=FALSE, warning=FALSE}
+edges <- network %>% select(CorrectPrediction,actualRatingValue,not,businessType,
+                            finalPrediction)
+edges$label <- edges$finalPrediction
+#edges$weight <- edges$not_ratios
+edges$width <- edges$not
+edges1 <- edges %>% mutate(from = plyr::mapvalues(edges$businessType,
+                                                  from = nodes$label, 
+                                                  to = nodes$id)
+                           )
+edges2 <- edges1 %>% mutate(to = plyr::mapvalues(edges$CorrectPrediction,
+                                                   from = nodes$title,
+                                                   to = nodes$id)
+                            )
+edges3 <- edges2 %>% select(from,to,label,width)
+head(edges3,10)
+```
+
+Lets see the link analysis visualization with the star layout.
+```{r}
+visNetwork(nodes=nodes1, edges=edges3, main='Grouped Predictions by Business Type') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=TRUE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout(layout='layout.star') %>%
+  visLegend
+```
+The above is a hula hoop because there are not any links for the most part, and only a handfule of the true or false predictions are mapping from business type to other business types by other business types predicted true or false. you can click on a node drag it off the disk and see no links, but click on the background to stop dragging. Then do the same with the center nodes that do have links to the disk and see the edges stay attached with the predicted value. Not many business types had the same predicted value as a true or false prediction of the same actual to predicted by business type.
+
+Lets see this design in a grid layout. The sphere is the default and you can see it doesn't really describe much visually without grouping when there are no links between the nodes.
+```{r}
+visNetwork(nodes=nodes1, edges=edges3, main='Grouped Predictions by Business Type') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=TRUE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout(layout='layout_on_grid') %>%
+  visLegend
+```
+
+The above is a grid layout that looks like tetris or pac man ping pong machine type layout with the groups.
+
+Lets look out the layout.graphopt layout next.
+```{r}
+visNetwork(nodes=nodes1, edges=edges3, main='Grouped Predictions by Business Type') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=TRUE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout(layout='layout.graphopt') %>%
+  visLegend
+```
+
+Looks a lot like the default layout for this data of features. This is the spherical layout that follows.
+```{r}
+visNetwork(nodes=nodes1, edges=edges3, main='Grouped Predictions by Business Type') %>% visEdges(arrows=c('from','middle')) %>%
+  visInteraction(navigationButtons=TRUE, dragNodes=TRUE,
+                 dragView=TRUE, zoomView = TRUE) %>%
+  visOptions(nodesIdSelection = TRUE, manipulation=FALSE) %>%
+  visIgraphLayout(layout='layout_on_sphere') %>%
+  visLegend
+```
+
+It looks similar to the hula hoop star layout for this data with minimal links between nodes.
+
+***
+***
+***
+ That was interesting to look at the different layouts in igraph with visNetwork, and to also see ways to improve our model design just as the businesses use reviews to improve or make changes as needed by analyzing the correctly and falsely predicted ratings. The next section will use machine learning algorithms in the 
+ [caret package](https://github.com/rstudio/cheatsheets/raw/master/caret.pdf)to test out results of various models and defaults as well as test out the attributes within each model for tuning and validating for better generalization. 
