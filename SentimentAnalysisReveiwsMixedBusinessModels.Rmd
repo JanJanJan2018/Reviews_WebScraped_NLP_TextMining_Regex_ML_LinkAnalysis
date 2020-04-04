@@ -9,7 +9,7 @@ output: html_document
 This is a web scraped social media review site of two chriopractic clinics offering massage, one low priced grocery store, and one high end massage retreat.The names of the doctors have been replaced with 'DOCTOR', and name of chiropracic facility to CHIROPRACTIC. The names of the high end massage retreat have been replaced with 'HIGH END SPA'. The name of the low cost grocery store was replaced with 'LOW COST GROCERY STORE.'
 
 This data table originally had 1338 observations, but that was an error due to copy and paste in Excel, so there is a need to remove empty rows after reading in the data if your copy of RStudio reads in those empty rows. After reading in the data there will be 516 reviews of mixed ratings for these business models. There aren't many reviews lower than four stars for the chiropractic clinics, but there is a lot of variation in the high end massage retreat and low cost grocery store reviews. These businesses are in the Corona area and the first to be listed when typing massage, except for the grocery store, because it was directly typed in. Note that the social media site will send your api information on your demographics to these businesses when extracting the data, so you should have an alias. 
-```{r}
+```{r, error=FALSE, message=FALSE, warning=FALSE}
 library(DT)
 library(tidyverse)
 library(dplyr)
@@ -22,6 +22,14 @@ library(textstem)
 library(stringr)
 library(visNetwork)
 library(igraph)
+
+#the following packages are needed by throw errors on some of the functions in dplyr and the tidyvere that make this script not run, so I am adding them to a chunk in the ML section to use them instead, after the other commands have been entered.
+# library(RANN) #this pkg supplements caret for one out bag validation
+# library(e1071)
+# library(caret)
+# library(randomForest)
+# library(MASS)
+# library(gbm)
 
 ```
 
@@ -73,7 +81,7 @@ Reviews1 <- Reviews[with(Reviews, order(fourVisitsPrior_rating,
                                         twoVisitsPrior_rating,
                                         lastVisit_rating, decreasing=FALSE)),]
 
-head(Reviews1)
+# head(Reviews1)
 ```
 
 The order by decreasing=FALSE had to be used to see those sequential visits from last visit, because these fields are character fields. When using predictive analytics they can be changed to factor, or we can change them to numeric.
@@ -105,7 +113,7 @@ We should also look at the table within Rmarkdown, because DT is fussy and takes
 
 ```{r}
 row.names(Reviews1) <- NULL
-head(Reviews1)
+# head(Reviews1)
 ```
 Reviews1 data table is ordered by the review with the most previous reviews in most to least. We see from this first observation in the table and many others that the reviews have a header that needs cleaning up. So, lets do that. We will use gsub to remove these headers with some regex commands.
 There are a lot of non character elements in the reviews that are considered white space characters for (\t)tabs, (\n)newlines or a mac newline(\r) or (\s)space. If any mistakes it'll be easy to adjust instead of rerunning codes to get the Reviews1 table.
@@ -113,27 +121,27 @@ There are a lot of non character elements in the reviews that are considered whi
 Reviews2 <- Reviews1 
 
 Reviews2$review <- gsub('[P].*[.][\\t][\\n]','',perl=TRUE,Reviews2$review)
-head(Reviews2)
+# head(Reviews2)
 ```
 
 We see that the Photo... header was removed if the review included a header. That placemarker is removed. But lets also remove the observations that didn't have a photo placemarker and with these observations remove anything between the header and the first listed date that is preceeded by two newlines and one tab.We will also extract the first name and the header of the observations we removed the photo placemarker from up to the first date listed.
 ```{r}
 Reviews2$review <- gsub('^[\\t][\\n]', '',  perl=TRUE, Reviews2$review)
 
-head(Reviews2)
+# head(Reviews2)
 
 ```
 
 I noticed there is a user name that begins with a single apostrophe, and it throws off this script if not fixed early, because later these names will be put into the userName field.So we have to add in the escape character backslash and apostrophe with a pipe for 'or' into this next command.
 ```{r}
 Reviews2$review <- gsub('^[a-zA-Z|\'].*[.]','', perl=TRUE, Reviews2$review)
-head(Reviews2)
+# head(Reviews2)
 ```
 
 We see that we have the city, state, number of friends, reviews, photos, and a status if they have more than a certain number of reviews. But also that this information could be useful, so we might want to split these string reviews by the 9 newline characters.
 ```{r}
 reviewStringSplit <- strsplit(Reviews2$review, split='[\n]{9}',perl=TRUE)
-head(reviewStringSplit)
+# head(reviewStringSplit,1)
 ```
 ***
 This is great, because now we can separate the review with the header information. Lets name one string the headerData and the other the userObservation.
@@ -162,7 +170,7 @@ Reviews2$eliteStatus <- lapply(headermetaSplit,'[',5)
 
 ```{r}
 userObservation <- lapply(reviewStringSplit,'[',2)
-head(userObservation,3)
+# head(userObservation,1)
 ```
 ***
 We can see from the second split of the string that the userObservation includes more meta data that includes the user name, date, if it was an updated review, and if available the number of check ins to the business and number of photos. The first name is the first part of this string. Lets split the string and make a field called userName to add to our table. We have to split by one newline and one tab, because one of the dates only has a prepend of one newline and one tab, although most are two newlines followed by a tab, we miss a review if we don't.
@@ -178,7 +186,7 @@ head(Reviews2$userName)
 
 Lets now replace the review field that has been slightly adjusted to exclude the first header. There is still the user name header that occurs right before the data and if the review is updated.This is the obsStrSplit2 list.
 ```{r}
-head(obsStrSplit2)
+# head(obsStrSplit2)
 ```
 ***
 
@@ -250,7 +258,7 @@ Reviews7 <- Reviews6 %>% select(-rating_last_first_if_multipleUpdated,
 
 
 ```{r}
-head(Reviews7)
+# head(Reviews7)
 ```
 
 Lets now remove the business response from the review content field.
@@ -273,7 +281,7 @@ Reviews9$businessReplied <- as.factor(Reviews9$businessReplied)
 
 PR <- strsplit(Reviews9$userReviewContent, split='[C][o][m][m][e][n][t] [f][r][o][m]',
                perl=TRUE)
-head(PR)
+# head(PR,1)
 ```
 
 Lets separate these into two separate character strings of user only review and PR_reply
@@ -292,7 +300,7 @@ grep('Comment', userOnlyReview)
 There shouldn't be any comments from business owners in this first part of the string.
 
 ```{r}
-head(userOnlyReview,6)
+# head(userOnlyReview,1)
 ```
 
 ***
@@ -310,7 +318,7 @@ Reviews9$userReviewOnlyContent <- gsub('[\n][P][h][o][t][o] [o][f].*','',
 Reviews9$userReviewOnlyContent <- gsub('[S][e][e] [a][l][l] [p].*','',
                                        Reviews9$userReviewOnlyContent,
                                    perl=TRUE)
-head(Reviews9[,13:15])
+# head(Reviews9[,13:15])
 ```
 
 We just mentioned the date beginning each userReviewOnlyContent and userReviewContent columns, so lets create a date column for these dates. There are actually a bunch of anomolies in that first part of the string.
@@ -370,7 +378,7 @@ Reviews10_DT
 
 
 ```{r}
-head(Reviews10)
+# head(Reviews10)
 ```
 
 The userReviewContent was kept in the table to compare the cleaned up columns on user reviews.
@@ -391,12 +399,12 @@ colnames(pixs) <- 'busPhotos'
 pixs$id <- pix
 pixs$busPhotos <- gsub('^[ ]','', pixs$busPhotos)
 pixs2 <- pixs[grep('^[0-9][ ][pP]',pixs$busPhotos, perl=TRUE),]
-head(pixs2)
+# head(pixs2)
 ```
 
 ```{r}
 pics <- strsplit(pixs2$busPhotos,split='[\n\n]',perl=TRUE)
-head(pics,2)
+# head(pics,1)
 ```
 
 From the above, we our only interested in the first split of photos, the other reviews are split on the double newline and caused multiple splits for most single reviews.
@@ -406,7 +414,7 @@ pixs2$userBusinessPhotos <- gsub(' photo','', pixs2$userBusinessPhotos)
 pixs2$userBusinessPhotos <- gsub('s','',pixs2$userBusinessPhotos)
 pixs2$userBusinessPhotos <- trimws(pixs2$userBusinessPhotos,which='right')
 pixs2$userBusinessPhotos <- as.numeric(paste(pixs2$userBusinessPhotos))
-head(pixs2)
+# head(pixs2)
 ```
 
 Lets keep only the id and userBusinessPhotos columns.
@@ -432,7 +440,7 @@ checks1 <- checks[chekn,]
 There are more check-ins than photos by the user. 
 ```{r}
 chekn <- checks1 %>% select(id, substring)
-head(chekn,10)
+# head(chekn,10)
 ```
 
 Lets remove the reference to photos and double newline characters from our substring.
@@ -504,7 +512,7 @@ Reviews13$userReviewOnlyContent <- gsub('[\n][ ][0-9]{1,2}.*[\n][\n]','',
                                         Reviews13$userReviewOnlyContent, perl=TRUE)
 Reviews13$userReviewOnlyContent <- trimws(Reviews13$userReviewOnlyContent, which='left',
                                           whitespace="[\n\t\r]")
-head(Reviews13,30)
+# head(Reviews13,30)
 ```
 Now it looks like we have our cleaned data to run sentiment and text analysis of in determining the rating the user review is given by the user. Lets write this file out to csv, and make a DT datatable for downloading from Rpubs.
 ```{r}
@@ -3154,5 +3162,553 @@ It looks similar to the hula hoop star layout for this data with minimal links b
 ***
 ***
 ***
+
  That was interesting to look at the different layouts in igraph with visNetwork, and to also see ways to improve our model design just as the businesses use reviews to improve or make changes as needed by analyzing the correctly and falsely predicted ratings. The next section will use machine learning algorithms in the 
  [caret package](https://github.com/rstudio/cheatsheets/raw/master/caret.pdf)to test out results of various models and defaults as well as test out the attributes within each model for tuning and validating for better generalization. 
+ 
+
+Lets use the Reviews15_results table, you can read it in if you closed your RStudio session and emptied your environment. The file we saved it as is the ML_Reviews614_resultsTable.csv file.
+```{r}
+colnames(Reviews15_results)
+
+```
+
+The column features to start with in predicting ratings will be the userRatingValue, businessReplied as a yes or no, LowAvgHighCost, businessType, number of friends, number of reviews, number of photos, number of userBusinessPhotos, weekday, number of userCheckIns, if the user is an eliteStatus, and the stopword ratios.Make sure your libraries are loaded, we will use the caret package to run some analysis on this table of features.
+```{r}
+businessRatings <- Reviews15_results %>% select(userRatingValue,businessReplied,
+      LowAvgHighCost,businessType, friends, reviews,  photos, eliteStatus,       
+   userBusinessPhotos,userCheckIns ,weekday ,the_ratios,and_ratios,for_ratios  ,have_ratios,that_ratios,they_ratios,this_ratios,you_ratios,not_ratios,but_ratios,
+   good_ratios,with_ratios)
+
+businessRatings$userRatingValue <- as.factor(paste(businessRatings$userRatingValue))
+head(businessRatings)
+```
+
+Lets use the numeric fields to predict the target of the ratings.
+```{r}
+numRegressions <- businessRatings %>% select(userRatingValue,
+                     friends:photos, userBusinessPhotos,userCheckIns,
+                     the_ratios:with_ratios)
+numRegressions$userRatingValue <- as.numeric(paste(numRegressions$userRatingValue))
+str(numRegressions)
+```
+
+Now lets select our training set and our testing set to build the caret models and test the models on. We will sample randomly with the sample function on our indices of the training set and use those indices not in the training set for our testing set.
+```{r}
+set.seed(56789)
+train <- sample(floor(.7*length(numRegressions$userRatingValue)),replace=FALSE)
+
+trainingSet <- numRegressions[train,]
+testingSet <- numRegressions[-train,]
+
+dim(trainingSet);dim(testingSet);dim(trainingSet)[1]+dim(testingSet)[1];dim(numRegressions)
+```
+Optionally you could use this method
+
+```{r}
+library(e1071)
+library(caret)
+library(randomForest)
+library(MASS)
+library(gbm)
+
+```
+
+```{r}
+inTrain <- createDataPartition(y=numRegressions$userRatingValue, p=0.7, list=FALSE)
+
+trainingSet2 <- numRegressions[inTrain,]
+testingSet2 <- numRegressions[-inTrain,]
+
+
+```
+
+
+Our training set to build the model is 429 reviews, and our testing set is 185 reviews.
+There are more 5s in the data overall. Lets look at those numbers.
+```{r}
+statsTrain <- trainingSet %>% group_by(userRatingValue) %>% count()
+statsTrain$percent <- statsTrain$n/sum(statsTrain$n)
+statsTrain
+```
+
+```{r}
+statsTest <- testingSet %>% group_by(userRatingValue) %>% count()
+statsTest$percent <- statsTest$n/sum(statsTest$n)
+statsTest
+```
+There are more percent of 3s and 5s in the testing set and more 1s,2s, and 4s in the training set. but not by too much.
+
+Lets see what the percent of sampling is with the createDataPartition function in the second sampled set.
+```{r}
+statsTrain2 <- trainingSet2 %>% group_by(userRatingValue) %>% count()
+statsTrain2$percent <- statsTrain2$n/sum(statsTrain2$n)
+statsTrain2
+```
+
+```{r}
+statsTest2 <- testingSet2 %>% group_by(userRatingValue) %>% count()
+statsTest2$percent <- statsTest2$n/sum(statsTest2$n)
+statsTest2
+
+```
+
+The number of percents are better with the createDataPartitions function, so we will use that sampling set.
+
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod0 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet2),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='oob'), number=5)
+```
+
+The following produces an error because of the imputing of missing data, when running the next line the predRF0 only has 15 rows, but the testingSet2 has 183, it only predicted by the features that were available.
+```{r,eval=FALSE}
+predRF0 <- predict(rfMod0, testingSet2)
+
+predDF0 <- data.frame(predRF0, type=testingSet2$userRatingValue)
+predDF0
+
+sum <- sum(predRF0==testingSet2$userRatingValue) 
+length <- length(testingSet2$userRatingValue)
+accuracy_rfMod0 <- (sum/length) 
+accuracy_rfMod0
+
+```
+
+
+Lets just use the data set without the meta data as many values are missing. We need a new data table. We will just remove the features we don't need from our testingSet2 and trainingSet2 tables. There are some bugs between one the previously installed package and select() of the dplyr and tidyverse packages.
+```{r}
+trainingSet3 <- trainingSet2[,c(1,7:18)]
+# trainingSet3 <- trainingSet2 %>% select(-friends, -reviews, -photos,
+#                                         -userBusinessPhotos,-userCheckIns)
+colnames(trainingSet3)
+```
+
+
+```{r}
+testingSet3 <- testingSet2[,c(1,7:18)]
+# testingSet3 <- testingSet2 %>% select(-friends, -reviews, -photos,
+#                                         -userBusinessPhotos,-userCheckIns)
+colnames(testingSet3)
+```
+
+```{r}
+dim(testingSet3);dim(trainingSet3)
+```
+Lets see if it works for the caret rf model this time.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+
+# requires the RANN package
+library(RANN)
+
+rfMod1 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","knnImpute"),
+               trControl=trainControl(method='oob'), number=5)
+```
+
+It does! 
+```{r}
+predRF1 <- predict(rfMod1, testingSet3)
+
+predDF1 <- data.frame(predRF1, type=testingSet3$userRatingValue)
+predDF1
+
+sum1 <- sum(predRF1==testingSet3$userRatingValue) 
+length1 <- length(testingSet3$userRatingValue)
+accuracy_rfMod1 <- (sum1/length1) 
+accuracy_rfMod1
+
+```
+We see that the above is regressing with the random forest, lets change the target to a factor.
+```{r}
+trainingSet3$userRatingValue <- as.factor(paste(trainingSet3$userRatingValue))
+testingSet3$userRatingValue <- as.factor(paste(testingSet3$userRatingValue))
+```
+
+Lets re-run the above two chunks of the model and predictions to see the results.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+# requires the RANN package
+
+rfMod1 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","knnImpute"),
+               trControl=trainControl(method='oob'), number=5)
+```
+
+```{r}
+predRF1 <- predict(rfMod1, testingSet3)
+
+predDF1 <- data.frame(predRF1, type=testingSet3$userRatingValue)
+predDF1
+
+sum1 <- sum(predRF1==testingSet3$userRatingValue) 
+length1 <- length(testingSet3$userRatingValue)
+accuracy_rfMod1 <- (sum1/length1) 
+head(accuracy_rfMod1,30)
+
+```
+The results are much better and actually the similar range of half and half as our manually built model by using just the stopwords that appeared the most to predict the rating. The above model also used the one out bagging method for trees in validating, and it preprocessed by centering and scaling the variables to normalize them as well as set to imputing NAs with knnImpute, even though there weren't any NAs in the ratios, just some zeros.
+
+
+This next model uses the bagImpute for NAs and with the same number, 5, of iterations to one out bag validation.
+```{r,message=FALSE, error=FALSE, warning=FALSE}
+rfMod2 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","bagImpute"),
+               trControl=trainControl(method='oob'), number=5)
+```
+
+```{r}
+predRF2 <- predict(rfMod2, testingSet3)
+
+predDF2 <- data.frame(predRF2, type=testingSet3$userRatingValue)
+predDF2
+
+sum2 <- sum(predRF2==testingSet3$userRatingValue) 
+length2 <- length(testingSet3$userRatingValue)
+accuracy_rfMod2 <- (sum2/length2) 
+head(accuracy_rfMod2,30)
+
+```
+The results of the bagImpute random forest classification is two percent worse than the knnImpute with the same settings in accuracy.
+
+
+This next random forest model uses the bootstrap method set to five iterations and medianImpute of NAs.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod3 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='boot'), number=5)
+```
+
+```{r}
+predRF3 <- predict(rfMod3, testingSet3)
+
+predDF3 <- data.frame(predRF3, type=testingSet3$userRatingValue)
+predDF3
+
+sum3 <- sum(predRF3==testingSet3$userRatingValue) 
+length3 <- length(testingSet3$userRatingValue)
+accuracy_rfMod3 <- (sum3/length3) 
+head(accuracy_rfMod3,30)
+
+```
+The results with the bootstrap method and median imputing of NAs is almost as good as the knnImpute of NAs with the one out bag. Both at 56% but the knnImpute 6/10 percent better.
+
+Lets use the bootstrap method with knnImpute on the next random forest model.
+```{r,error=FALSE, message=FALSE,warning=FALSE}
+rfMod4 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","knnImpute"),
+               trControl=trainControl(method='boot'), number=5)
+```
+
+```{r}
+predRF4 <- predict(rfMod4, testingSet3)
+
+predDF4 <- data.frame(predRF4, type=testingSet3$userRatingValue)
+predDF4
+
+sum4 <- sum(predRF4==testingSet3$userRatingValue) 
+length4 <- length(testingSet3$userRatingValue)
+accuracy_rfMod4 <- (sum4/length4) 
+head(accuracy_rfMod4,30)
+
+```
+The bootstrap with knnImpute above did exactly the same as the medianImpute bootstrap random forest as they both predicted 103/183 correct. The knnImpute with one out bag did the best so far with 104/183. The lowest scoring imputing was bagImpute in the one out bag. Lets see this NA imputation with the adaptive_cv method.
+
+Lets use the 
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod5 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","bagImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=5)
+```
+
+```{r}
+predRF5 <- predict(rfMod5, testingSet3)
+
+predDF5 <- data.frame(predRF5, type=testingSet3$userRatingValue)
+predDF5
+
+sum5 <- sum(predRF5==testingSet3$userRatingValue) 
+length5 <- length(testingSet3$userRatingValue)
+accuracy_rfMod5 <- (sum5/length5) 
+head(accuracy_rfMod5,30)
+
+```
+It turns out the bagImpute with adaptive_cv validation random forest model scored 104/183 correctly as best model with the knnImpute one out bag model.
+
+The next is a medianImpute with adaptive_boot validation.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod6 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_boot'), number=5)
+```
+
+```{r}
+predRF6 <- predict(rfMod6, testingSet3)
+
+predDF6 <- data.frame(predRF6, type=testingSet3$userRatingValue)
+predDF6
+
+sum6 <- sum(predRF6==testingSet3$userRatingValue) 
+length6 <- length(testingSet3$userRatingValue)
+accuracy_rfMod6 <- (sum6/length6) 
+head(accuracy_rfMod6,30)
+
+```
+So far the range is 100-104 out of 183 ratings predicted correctly.
+
+The next model is medianImpute with adaptive_cv
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod7 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="random",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=5)
+```
+
+```{r}
+predRF7 <- predict(rfMod7, testingSet3)
+
+predDF7 <- data.frame(predRF7, type=testingSet3$userRatingValue)
+predDF7
+
+sum7 <- sum(predRF7==testingSet3$userRatingValue) 
+length7 <- length(testingSet3$userRatingValue)
+accuracy_rfMod7 <- (sum7/length7) 
+head(accuracy_rfMod7,30)
+
+```
+Nothing outside the range yet. Lets keep going.
+
+This next model is medianImpute and adaptive_cv with an added grid search.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod8 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="grid",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=5)
+```
+
+```{r}
+predRF8 <- predict(rfMod8, testingSet3)
+
+predDF8 <- data.frame(predRF8, type=testingSet3$userRatingValue)
+predDF8
+
+sum8 <- sum(predRF8==testingSet3$userRatingValue) 
+length8 <- length(testingSet3$userRatingValue)
+accuracy_rfMod8 <- (sum8/length8) 
+head(accuracy_rfMod8,30)
+
+```
+Nothing new on the other model. Lets run two other models of random forest. Lets use the grid search again but use 10 iterations instead of 5 with the medianImputed NAs attribute.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod9 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="grid",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=10)
+```
+
+```{r}
+predRF9 <- predict(rfMod9, testingSet3)
+
+predDF9 <- data.frame(predRF9, type=testingSet3$userRatingValue)
+predDF9
+
+sum9 <- sum(predRF9==testingSet3$userRatingValue) 
+length9 <- length(testingSet3$userRatingValue)
+accuracy_rfMod9 <- (sum9/length9) 
+head(accuracy_rfMod9,30)
+
+```
+The above model with medianImpute, 10 iterations of adaptive_cv validation, and grid search did score better than the bottom scoring models at 55 % or 102/183 correct.
+
+This last random forest model uses random search, medianImpute, and 10 iterations of adaptive cv.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod10 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="random",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=10)
+```
+
+```{r}
+predRF10 <- predict(rfMod10, testingSet3)
+
+predDF10 <- data.frame(predRF10, type=testingSet3$userRatingValue)
+predDF10
+
+sum10 <- sum(predRF10==testingSet3$userRatingValue) 
+length10 <- length(testingSet3$userRatingValue)
+accuracy_rfMod10 <- (sum10/length10) 
+head(accuracy_rfMod10,30)
+
+```
+And the last random forest model scored 54 % with 99/183 correct. This model last ran rfMod10 is actually the lowest scoring model for accuracy in rating predictions.
+
+
+```{r}
+accuracy10RFModels <- as.data.frame(c(accuracy_rfMod1,
+                        accuracy_rfMod2, accuracy_rfMod3,
+                        accuracy_rfMod4, accuracy_rfMod5,
+                        accuracy_rfMod6, accuracy_rfMod7,
+                        accuracy_rfMod8, accuracy_rfMod9,
+                        accuracy_rfMod10))
+colnames(accuracy10RFModels) <- 'accuracyResults'
+row.names(accuracy10RFModels) <- c('knnImpute_OOB_5', 
+                                   'bagImpute_OOB_5','medianImpute_boot_5',
+                                   'knnImpute_boot_5','bagImpute_adaptive_cv_5',
+                                  'medianImpute_adaptive_boot_5',
+                                  'medianImpute_randomSearch_adaptive_cv_5',
+                                  'medianImpute_gridSearch_adaptive_cv_5',
+                                  'medianImpute_gridSearch_adaptiv_cv_10',
+                                  'medianImpute_randomSearch_adaptive_cv_10')
+
+accuracy10RFModels
+```
+
+
+From here I could clean up the text and run the ratios for each and see if other keywords would predict better. Or we could test out the other machine learning models in the caret package any play with their function settings to see if we get better results. We could also use the best model above and test it on the meta data headers extracted from the data. but unable to use for the NAs being dropped with the impute method of NAs.
+
+
+***
+
+
+
+
+Some previous models from other studies I did, with different data and therefore different names.
+```{r,eval=FALSE}
+knnMod <- train(ROI_Low_High ~ .,
+                method='knn', preProcess=c('center','scale'),
+                tuneLength=10, trControl=trainControl(method='cv'), data=trainingSet)
+plot(knnMod)
+
+```
+
+
+```{r,eval=FALSE}
+rpartMod <- train(ROI_Low_High ~ ., method='rpart', tuneLength=7, data=trainingSet) 
+
+```
+
+```{r, message=FALSE, warning=FALSE, error=FALSE,eval=FALSE}
+glmMod <- train(ROI_Low_High ~ ., 
+                method='glm', data=trainingSet) 
+```
+
+
+```{r,eval=FALSE}
+predKNN <- predict(knnMod, testingSet)
+predRPART <- predict(rpartMod, testingSet)
+predGLM <- predict(glmMod, testingSet)
+
+```
+
+
+```{r,eval=FALSE}
+length=length(testingSet$ROI_Low_High)
+
+sumKNN <- sum(predKNN==testingSet$ROI_Low_High)
+sumRPart <- sum(predRPART==testingSet$ROI_Low_High)
+sumGLM <- sum(predGLM==testingSet$ROI_Low_High)
+
+```
+
+```{r,eval=FALSE}
+accuracy_KNN <- sumKNN/length 
+accuracy_RPART <- sumRPart/length 
+accuracy_GLM <- sumGLM/length 
+
+```
+
+
+```{r,eval=FALSE}
+predDF2 <- data.frame(predRF,predKNN,predRPART,predGLM, 
+                      TYPE=testingSet$ROI_Low_High)
+colnames(predDF2) <- c('RandomForest','KNN','Rpart','GLM','TrueValue')
+
+results <- c(round(accuracy_rfMod,2),  
+             round(accuracy_KNN,2), 
+             round(accuracy_RPART,2),
+             round(accuracy_GLM,2), 
+             round(100,2))
+
+results <- as.factor(results)
+results <- t(data.frame(results))
+colnames(results) <- c('RandomForest','KNN','Rpart','GLM','TrueValue')
+Results <- rbind(predDF2, results) 
+Results
+```
+
+```{r,eval=FALSE}
+#Now the analytics can be done, using the same packages
+set.seed(189678345) # this will reproduce the same numbers each time sampling is done
+# run set.seed value to get exact results, otherwise results differ
+
+# creates a partition of the data by indices
+inTrain <- createDataPartition(y=MAJ10$TYPE, p=0.7, list=FALSE)#85
+
+trainingSet <- MAJ10[inTrain,]#85X7
+testingSet <- MAJ10[-inTrain,]#36X7
+
+# randomForest, cross-validation (cv) = 5
+rfMod <- train(TYPE~., method='rf', data=(trainingSet), 
+               trControl=trainControl(method='cv'), number=5)
+plot(rfMod)
+
+# generalizedBoostedModel
+gbmMod <- train(TYPE~., method='gbm', data=trainingSet, verbose=FALSE )
+
+plot(gbmMod)
+
+
+# linkage dirichlet allocation model
+ldaMod <- train(TYPE~., method='lda', data=trainingSet)
+
+# the ldaMod cannot be plotted, 'no tuning parameters for this model'
+
+# run predictions on the testing set
+predRF <- predict(rfMod, testingSet)
+predGbm <- predict(gbmMod, testingSet)
+predlda <- predict(ldaMod, testingSet)
+
+predDF <- data.frame(predRF, predGbm, predlda, type=testingSet$TYPE)
+predDF
+
+CombinedModels <- train(type~., method='gam', data=predDF)
+CombinedPredictions <- predict(CombinedModels, predDF)
+CombinedPredictions
+
+sum <- sum(CombinedPredictions==testingSet$TYPE)#30
+length <- length(testingSet$TYPE)#36
+accuracy_CP1 <- sum/length #0.833
+
+sum <- sum(predRF==testingSet$TYPE) #26
+length <- length(testingSet$TYPE)#36
+accuracy_rfMod <- (sum/length) #0.722
+
+sum <- sum(predGbm==testingSet$TYPE)#21
+accuracy_gbmMod <- sum/length # 0.583
+
+sum <- sum(predlda==testingSet$TYPE) #29
+accuracy_ldaMod <- sum/length #0.805
+
+rf2 <- randomForest(TYPE~., data=trainingSet, method='class')
+
+plot(rf2)
+
+predRF2 <- predict(rf2, testingSet, type='class')
+
+sum <- sum(predRF2==testingSet$TYPE)#25
+accuracy_RF2 <- sum/length # 0.6944
+
+confusionMatrix(predRF2, testingSet$TYPE)
+predDF2 <- data.frame(predRF, predRF2, predlda, predGbm, TYPE=testingSet$TYPE)
+
+CombinedModels2 <- train(TYPE~., method='gam', data=predDF2)
+CombinedPredictions2 <- predict(CombinedModels2, predDF2)
+CombinedPredictions2
+```

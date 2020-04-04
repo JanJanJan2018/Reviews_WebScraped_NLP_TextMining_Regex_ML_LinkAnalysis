@@ -15,13 +15,14 @@ library(tidyr)
 library(stringr)
 library(visNetwork)
 library(igraph)
+library(tm)
+# library(e1071)
 library(caret)
-library(e1071)
-library(caret)
-library(randomForest)
-library(MASS)
-library(gbm)
-
+# library(randomForest)
+# library(MASS)
+# library(gbm)
+#install.packages('RANN')
+library(RANN) #used in the tuning parameter of rf method of caret for 'oob' one out bag
 
 ```
 
@@ -44,6 +45,7 @@ colnames(Reviews15)
 ```
 
 ```{r}
+#ML_rating_data <- Reviews15[,c(5,33:43)]
 ML_rating_data <- Reviews15 %>% select(userRatingValue,
                                        the_ratios:with_ratios)
 head(ML_rating_data)
@@ -53,7 +55,7 @@ head(ML_rating_data)
 If, or when, we use the caret algorithms to make predictions with many of the available models in caret, the target variable would be the userRatingValue, and the keyword ratios (12) would be the predictors. But we aren't right at this moment and so we don't have to separate the target from the predictors just yet. We can keep it attached to compare to our model we build on the ceiling of the mean if a tie in votes for the minimum values of the review ratio to the five rating rations.
 
 Keep the rating column as an integer instead of a factor, because we need it as an integer to use the dot product on those reviews that there is a tie against the votes (the minimum value of the difference between the term to total terms in the document to the ratios of the same for all the documents in each rating). We saw earlier that there are some instances where there is a tie, but that the ceiling of the mean or the highest rating will beat out the ceiling of the median or the shortest distance (absolute value) between the reveiw ratio and rating ratios. We need to also get our data frame on ratios of total of each of these 12 words or terms to the total of all words in each corpus or file of reviews by rating in the wordToAllWords table. 
-```{r, eval=FALSE}
+```{r}
 colnames(wordToAllWords)[3] <- 'for_' #this is special keyword in R
 w2w <- wordToAllWords #shorten name
 MLr <- ML_rating_data #shorten the name
@@ -911,97 +913,325 @@ statsTest2
 The number of percents are better with the createDataPartitions function, so we will use that sampling set.
 
 ```{r, error=FALSE, message=FALSE, warning=FALSE}
-rfMod <- train(userRatingValue~., method='rf', 
+rfMod0 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
                data=(trainingSet2),  preProc = c("center", "scale","medianImpute"),
                trControl=trainControl(method='oob'), number=5)
-plot(rfMod)
 ```
 
+The following produces an error because of the imputing of missing data, when running the next line the predRF0 only has 15 rows, but the testingSet2 has 183, it only predicted by the features that were available.
+```{r,eval=FALSE}
+predRF0 <- predict(rfMod0, testingSet2)
+
+predDF0 <- data.frame(predRF0, type=testingSet2$userRatingValue)
+predDF0
+
+sum <- sum(predRF0==testingSet2$userRatingValue) 
+length <- length(testingSet2$userRatingValue)
+accuracy_rfMod0 <- (sum/length) 
+accuracy_rfMod0
+
+```
+
+
+Lets just use the data set without the meta data as many values are missing. We need a new data table. We will just remove the features we don't need from our testingSet2 and trainingSet2 tables.
+```{r}
+trainingSet3 <- trainingSet2 %>% select(-friends, -reviews, -photos,
+                                        -userBusinessPhotos,-userCheckIns)
+colnames(trainingSet3)
+```
+```{r}
+testingSet3 <- testingSet2 %>% select(-friends, -reviews, -photos,
+                                        -userBusinessPhotos,-userCheckIns)
+colnames(testingSet3)
+```
+
+```{r}
+dim(testingSet3);dim(trainingSet3)
+```
+Lets see if it works for the caret rf model this time.
 ```{r, error=FALSE, message=FALSE, warning=FALSE}
-rfMod <- train(userRatingValue~., method='rf', 
+# requires the RANN package
+
+rfMod1 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
-               data=(trainingSet2),  preProc = c("center", "scale","knnImpute"),
+               data=(trainingSet3),  preProc = c("center", "scale","knnImpute"),
                trControl=trainControl(method='oob'), number=5)
-plot(rfMod)
-
-
 ```
 
+It does! 
 ```{r}
-rfMod <- train(userRatingValue~., method='rf', 
+predRF1 <- predict(rfMod1, testingSet3)
+
+predDF1 <- data.frame(predRF1, type=testingSet3$userRatingValue)
+predDF1
+
+sum1 <- sum(predRF1==testingSet3$userRatingValue) 
+length1 <- length(testingSet3$userRatingValue)
+accuracy_rfMod1 <- (sum1/length1) 
+accuracy_rfMod1
+
+```
+We see that the above is regressing with the random forest, lets change the target to a factor.
+```{r}
+trainingSet3$userRatingValue <- as.factor(paste(trainingSet3$userRatingValue))
+testingSet3$userRatingValue <- as.factor(paste(testingSet3$userRatingValue))
+```
+
+Lets re-run the above two chunks of the model and predictions to see the results.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+# requires the RANN package
+
+rfMod1 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
-               data=(trainingSet2),  preProc = c("center", "scale","bagImpute"),
+               data=(trainingSet3),  preProc = c("center", "scale","knnImpute"),
                trControl=trainControl(method='oob'), number=5)
-plot(rfMod)
-
-
 ```
 
+```{r}
+predRF1 <- predict(rfMod1, testingSet3)
 
+predDF1 <- data.frame(predRF1, type=testingSet3$userRatingValue)
+predDF1
+
+sum1 <- sum(predRF1==testingSet3$userRatingValue) 
+length1 <- length(testingSet3$userRatingValue)
+accuracy_rfMod1 <- (sum1/length1) 
+head(accuracy_rfMod1,30)
+
+```
+The results are much better and actually the similar range of half and half as our manually built model by using just the stopwords that appeared the most to predict the rating. The above model also used the one out bagging method for trees in validating, and it preprocessed by centering and scaling the variables to normalize them as well as set to imputing NAs with knnImpute, even though there weren't any NAs in the ratios, just some zeros.
+
+
+This next model uses the bagImpute for NAs and with the same number, 5, of iterations to one out bag validation.
+```{r,message=FALSE, error=FALSE, warning=FALSE}
+rfMod2 <- train(userRatingValue~., method='rf', 
+               na.action=na.pass,
+               data=(trainingSet3),  preProc = c("center", "scale","bagImpute"),
+               trControl=trainControl(method='oob'), number=5)
+```
 
 ```{r}
-rfMod <- train(userRatingValue~., method='rf', 
+predRF2 <- predict(rfMod2, testingSet3)
+
+predDF2 <- data.frame(predRF2, type=testingSet3$userRatingValue)
+predDF2
+
+sum2 <- sum(predRF2==testingSet3$userRatingValue) 
+length2 <- length(testingSet3$userRatingValue)
+accuracy_rfMod2 <- (sum2/length2) 
+head(accuracy_rfMod2,30)
+
+```
+The results of the bagImpute random forest classification is two percent worse than the knnImpute with the same settings in accuracy.
+
+
+This next random forest model uses the bootstrap method set to five iterations and medianImpute of NAs.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod3 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
-               data=(trainingSet2),  preProc = c("center", "scale","medianImpute"),
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
                trControl=trainControl(method='boot'), number=5)
-plot(rfMod)
 ```
 
-
 ```{r}
-rfMod <- train(userRatingValue~., method='rf', 
+predRF3 <- predict(rfMod3, testingSet3)
+
+predDF3 <- data.frame(predRF3, type=testingSet3$userRatingValue)
+predDF3
+
+sum3 <- sum(predRF3==testingSet3$userRatingValue) 
+length3 <- length(testingSet3$userRatingValue)
+accuracy_rfMod3 <- (sum3/length3) 
+head(accuracy_rfMod3,30)
+
+```
+The results with the bootstrap method and median imputing of NAs is almost as good as the knnImpute of NAs with the one out bag. Both at 56% but the knnImpute 6/10 percent better.
+
+Lets use the bootstrap method with knnImpute on the next random forest model.
+```{r,error=FALSE, message=FALSE,warning=FALSE}
+rfMod4 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
-               data=(trainingSet2),  preProc = c("center", "scale","knnImpute"),
+               data=(trainingSet3),  preProc = c("center", "scale","knnImpute"),
                trControl=trainControl(method='boot'), number=5)
-plot(rfMod)
 ```
 
 ```{r}
-rfMod <- train(userRatingValue~., method='rf', 
+predRF4 <- predict(rfMod4, testingSet3)
+
+predDF4 <- data.frame(predRF4, type=testingSet3$userRatingValue)
+predDF4
+
+sum4 <- sum(predRF4==testingSet3$userRatingValue) 
+length4 <- length(testingSet3$userRatingValue)
+accuracy_rfMod4 <- (sum4/length4) 
+head(accuracy_rfMod4,30)
+
+```
+The bootstrap with knnImpute above did exactly the same as the medianImpute bootstrap random forest as they both predicted 103/183 correct. The knnImpute with one out bag did the best so far with 104/183. The lowest scoring imputing was bagImpute in the one out bag. Lets see this NA imputation with the adaptive_cv method.
+
+Lets use the 
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod5 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
-               data=(trainingSet2),  preProc = c("center", "scale","bagImpute"),
-               trControl=trainControl(method='boot'), number=5)
-plot(rfMod)
+               data=(trainingSet3),  preProc = c("center", "scale","bagImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=5)
 ```
 
 ```{r}
-y <- as.factor(paste(trainingSet2$userRatingValue))
-x <- trainingSet2[,2:18]
-system.time(rfMod <- train(y~., method='rf', 
+predRF5 <- predict(rfMod5, testingSet3)
+
+predDF5 <- data.frame(predRF5, type=testingSet3$userRatingValue)
+predDF5
+
+sum5 <- sum(predRF5==testingSet3$userRatingValue) 
+length5 <- length(testingSet3$userRatingValue)
+accuracy_rfMod5 <- (sum5/length5) 
+head(accuracy_rfMod5,30)
+
+```
+It turns out the bagImpute with adaptive_cv validation random forest model scored 104/183 correctly as best model with the knnImpute one out bag model.
+
+The next is a medianImpute with adaptive_boot validation.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod6 <- train(userRatingValue ~., method='rf', 
                na.action=na.pass,
-               data=(trainingSet2),  preProc = c("center", "scale","medianImpute"),
-               trControl=trainControl(method='boot'), number=5))
-plot(rfMod)
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_boot'), number=5)
 ```
 
 ```{r}
-predRF <- predict(rfMod, testingSet)
+predRF6 <- predict(rfMod6, testingSet3)
 
-predDF <- data.frame(predRF, type=testingSet$ROI_Low_High)
-predDF
+predDF6 <- data.frame(predRF6, type=testingSet3$userRatingValue)
+predDF6
 
-sum <- sum(predRF==testingSet$ROI_Low_High) 
-length <- length(testingSet$ROI_Low_High)
-accuracy_rfMod <- (sum/length) 
-accuracy_rfMod
+sum6 <- sum(predRF6==testingSet3$userRatingValue) 
+length6 <- length(testingSet3$userRatingValue)
+accuracy_rfMod6 <- (sum6/length6) 
+head(accuracy_rfMod6,30)
 
 ```
+So far the range is 100-104 out of 183 ratings predicted correctly.
+
+The next model is medianImpute with adaptive_cv
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod7 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="random",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=5)
+```
+
+```{r}
+predRF7 <- predict(rfMod7, testingSet3)
+
+predDF7 <- data.frame(predRF7, type=testingSet3$userRatingValue)
+predDF7
+
+sum7 <- sum(predRF7==testingSet3$userRatingValue) 
+length7 <- length(testingSet3$userRatingValue)
+accuracy_rfMod7 <- (sum7/length7) 
+head(accuracy_rfMod7,30)
+
+```
+Nothing outside the range yet. Lets keep going.
+
+This next model is medianImpute and adaptive_cv with an added grid search.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod8 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="grid",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=5)
+```
+
+```{r}
+predRF8 <- predict(rfMod8, testingSet3)
+
+predDF8 <- data.frame(predRF8, type=testingSet3$userRatingValue)
+predDF8
+
+sum8 <- sum(predRF8==testingSet3$userRatingValue) 
+length8 <- length(testingSet3$userRatingValue)
+accuracy_rfMod8 <- (sum8/length8) 
+head(accuracy_rfMod8,30)
+
+```
+Nothing new on the other model. Lets run two other models of random forest. Lets use the grid search again but use 10 iterations instead of 5 with the medianImputed NAs attribute.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod9 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="grid",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=10)
+```
+
+```{r}
+predRF9 <- predict(rfMod9, testingSet3)
+
+predDF9 <- data.frame(predRF9, type=testingSet3$userRatingValue)
+predDF9
+
+sum9 <- sum(predRF9==testingSet3$userRatingValue) 
+length9 <- length(testingSet3$userRatingValue)
+accuracy_rfMod9 <- (sum9/length9) 
+head(accuracy_rfMod9,30)
+
+```
+The above model with medianImpute, 10 iterations of adaptive_cv validation, and grid search did score better than the bottom scoring models at 55 % or 102/183 correct.
+
+This last random forest model uses random search, medianImpute, and 10 iterations of adaptive cv.
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+rfMod10 <- train(userRatingValue ~., method='rf', 
+               na.action=na.pass, search="random",
+               data=(trainingSet3),  preProc = c("center", "scale","medianImpute"),
+               trControl=trainControl(method='adaptive_cv'), number=10)
+```
+
+```{r}
+predRF10 <- predict(rfMod10, testingSet3)
+
+predDF10 <- data.frame(predRF10, type=testingSet3$userRatingValue)
+predDF10
+
+sum10 <- sum(predRF10==testingSet3$userRatingValue) 
+length10 <- length(testingSet3$userRatingValue)
+accuracy_rfMod10 <- (sum10/length10) 
+head(accuracy_rfMod10,30)
+
+```
+And the last random forest model scored 54 % with 99/183 correct. This model last ran rfMod10 is actually the lowest scoring model for accuracy in rating predictions.
 
 
 ```{r}
-results <- c(round(accuracy_rfMod,2), round(100,2))
-results <- as.factor(results)
-results <- t(data.frame(results))
+accuracy10RFModels <- as.data.frame(c(accuracy_rfMod1,
+                        accuracy_rfMod2, accuracy_rfMod3,
+                        accuracy_rfMod4, accuracy_rfMod5,
+                        accuracy_rfMod6, accuracy_rfMod7,
+                        accuracy_rfMod8, accuracy_rfMod9,
+                        accuracy_rfMod10))
+colnames(accuracy10RFModels) <- 'accuracyResults'
+row.names(accuracy10RFModels) <- c('knnImpute_OOB_5', 
+                                   'bagImpute_OOB_5','medianImpute_boot_5',
+                                   'knnImpute_boot_5','bagImpute_adaptive_cv_5',
+                                  'medianImpute_adaptive_boot_5',
+                                  'medianImpute_randomSearch_adaptive_cv_5',
+                                  'medianImpute_gridSearch_adaptive_cv_5',
+                                  'medianImpute_gridSearch_adaptiv_cv_10',
+                                  'medianImpute_randomSearch_adaptive_cv_10')
 
-colnames(results) <- colnames(predDF)
-Results <- rbind(predDF, results) 
-Results
-
+accuracy10RFModels
 ```
 
 
-```{r}
+From here I could clean up the text and run the ratios for each and see if other keywords would predict better. Or we could test out the other machine learning models in the caret package any play with their function settings to see if we get better results. We could also use the best model above and test it on the meta data headers extracted from the data. but unable to use for the NAs being dropped with the impute method of NAs.
+
+
+***
+
+
+
+
+Some previous models from other studies I did, with different data and therefore different names.
+```{r,eval=FALSE}
 knnMod <- train(ROI_Low_High ~ .,
                 method='knn', preProcess=c('center','scale'),
                 tuneLength=10, trControl=trainControl(method='cv'), data=trainingSet)
@@ -1010,18 +1240,18 @@ plot(knnMod)
 ```
 
 
-```{r}
+```{r,eval=FALSE}
 rpartMod <- train(ROI_Low_High ~ ., method='rpart', tuneLength=7, data=trainingSet) 
 
 ```
 
-```{r, message=FALSE, warning=FALSE, error=FALSE}
+```{r, message=FALSE, warning=FALSE, error=FALSE,eval=FALSE}
 glmMod <- train(ROI_Low_High ~ ., 
                 method='glm', data=trainingSet) 
 ```
 
 
-```{r}
+```{r,eval=FALSE}
 predKNN <- predict(knnMod, testingSet)
 predRPART <- predict(rpartMod, testingSet)
 predGLM <- predict(glmMod, testingSet)
@@ -1029,7 +1259,7 @@ predGLM <- predict(glmMod, testingSet)
 ```
 
 
-```{r}
+```{r,eval=FALSE}
 length=length(testingSet$ROI_Low_High)
 
 sumKNN <- sum(predKNN==testingSet$ROI_Low_High)
@@ -1038,7 +1268,7 @@ sumGLM <- sum(predGLM==testingSet$ROI_Low_High)
 
 ```
 
-```{r}
+```{r,eval=FALSE}
 accuracy_KNN <- sumKNN/length 
 accuracy_RPART <- sumRPart/length 
 accuracy_GLM <- sumGLM/length 
@@ -1046,7 +1276,7 @@ accuracy_GLM <- sumGLM/length
 ```
 
 
-```{r}
+```{r,eval=FALSE}
 predDF2 <- data.frame(predRF,predKNN,predRPART,predGLM, 
                       TYPE=testingSet$ROI_Low_High)
 colnames(predDF2) <- c('RandomForest','KNN','Rpart','GLM','TrueValue')
