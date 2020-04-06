@@ -3162,11 +3162,9 @@ It looks similar to the hula hoop star layout for this data with minimal links b
 ***
 ***
 ***
-
  That was interesting to look at the different layouts in igraph with visNetwork, and to also see ways to improve our model design just as the businesses use reviews to improve or make changes as needed by analyzing the correctly and falsely predicted ratings. The next section will use machine learning algorithms in the 
  [caret package](https://github.com/rstudio/cheatsheets/raw/master/caret.pdf)to test out results of various models and defaults as well as test out the attributes within each model for tuning and validating for better generalization. 
  
-
 Lets use the Reviews15_results table, you can read it in if you closed your RStudio session and emptied your environment. The file we saved it as is the ML_Reviews614_resultsTable.csv file.
 ```{r}
 colnames(Reviews15_results)
@@ -3176,9 +3174,15 @@ colnames(Reviews15_results)
 The column features to start with in predicting ratings will be the userRatingValue, businessReplied as a yes or no, LowAvgHighCost, businessType, number of friends, number of reviews, number of photos, number of userBusinessPhotos, weekday, number of userCheckIns, if the user is an eliteStatus, and the stopword ratios.Make sure your libraries are loaded, we will use the caret package to run some analysis on this table of features.
 ```{r}
 businessRatings <- Reviews15_results %>% select(userRatingValue,businessReplied,
-      LowAvgHighCost,businessType, friends, reviews,  photos, eliteStatus,       
-   userBusinessPhotos,userCheckIns ,weekday ,the_ratios,and_ratios,for_ratios  ,have_ratios,that_ratios,they_ratios,this_ratios,you_ratios,not_ratios,but_ratios,
-   good_ratios,with_ratios)
+                                                LowAvgHighCost,businessType,
+                                                friends ,             
+ reviews  ,            photos      ,          eliteStatus   ,       
+   userBusinessPhotos   ,
+ userCheckIns ,         weekday ,   the_ratios,           
+ and_ratios   ,         for_ratios  ,          have_ratios  ,        
+ that_ratios  ,         they_ratios   ,        this_ratios ,         
+ you_ratios   ,         not_ratios    ,        but_ratios ,          
+ good_ratios  ,         with_ratios                  )
 
 businessRatings$userRatingValue <- as.factor(paste(businessRatings$userRatingValue))
 head(businessRatings)
@@ -3203,7 +3207,6 @@ testingSet <- numRegressions[-train,]
 
 dim(trainingSet);dim(testingSet);dim(trainingSet)[1]+dim(testingSet)[1];dim(numRegressions)
 ```
-Optionally you could use this method
 
 ```{r}
 library(e1071)
@@ -3214,6 +3217,7 @@ library(gbm)
 
 ```
 
+Optionally you could use this method
 ```{r}
 inTrain <- createDataPartition(y=numRegressions$userRatingValue, p=0.7, list=FALSE)
 
@@ -3254,6 +3258,10 @@ statsTest2
 ```
 
 The number of percents are better with the createDataPartitions function, so we will use that sampling set.
+```{r}
+library(RANN) #this pkg supplements caret for one out bag validation, and interferes with the select function of tidyverse and dplyr
+
+```
 
 ```{r, error=FALSE, message=FALSE, warning=FALSE}
 rfMod0 <- train(userRatingValue~., method='rf', 
@@ -3277,17 +3285,18 @@ accuracy_rfMod0
 ```
 
 
-Lets just use the data set without the meta data as many values are missing. We need a new data table. We will just remove the features we don't need from our testingSet2 and trainingSet2 tables. There are some bugs between one the previously installed package and select() of the dplyr and tidyverse packages.
+Lets just use the data set without the meta data as many values are missing. We need a new data table. We will just remove the features we don't need from our testingSet2 and trainingSet2 tables. Some of the supplemental packages to caret when tuning the random forest trees interferes with tidyverse packages, so we'll use slicing.
 ```{r}
 trainingSet3 <- trainingSet2[,c(1,7:18)]
+trainingSet3$userRatingValue <- as.factor(paste(trainingSet3$userRatingValue))
+
 # trainingSet3 <- trainingSet2 %>% select(-friends, -reviews, -photos,
 #                                         -userBusinessPhotos,-userCheckIns)
 colnames(trainingSet3)
 ```
-
-
 ```{r}
 testingSet3 <- testingSet2[,c(1,7:18)]
+testingSet3$userRatingValue <- as.factor(paste(testingSet3$userRatingValue))
 # testingSet3 <- testingSet2 %>% select(-friends, -reviews, -photos,
 #                                         -userBusinessPhotos,-userCheckIns)
 colnames(testingSet3)
@@ -3298,9 +3307,7 @@ dim(testingSet3);dim(trainingSet3)
 ```
 Lets see if it works for the caret rf model this time.
 ```{r, error=FALSE, message=FALSE, warning=FALSE}
-
 # requires the RANN package
-library(RANN)
 
 rfMod1 <- train(userRatingValue~., method='rf', 
                na.action=na.pass,
@@ -3372,6 +3379,7 @@ accuracy_rfMod2 <- (sum2/length2)
 head(accuracy_rfMod2,30)
 
 ```
+
 The results of the bagImpute random forest classification is two percent worse than the knnImpute with the same settings in accuracy.
 
 
@@ -3547,7 +3555,7 @@ accuracy_rfMod10 <- (sum10/length10)
 head(accuracy_rfMod10,30)
 
 ```
-And the last random forest model scored 54 % with 99/183 correct. This model last ran rfMod10 is actually the lowest scoring model for accuracy in rating predictions.
+And the last random forest model scored 54 % with 99/183 correct. This model last ran rfMod10 is actually the lowest scoring model for accuracy in rating predictions.We should also add in the accuracy for our manual mean model that took the difference of the reviews word to all words and compared to all documents in each rating's word to each word of those 12 key words, took the difference, selected the minimum value, and if a tie took the ceiling of the mean of the dot product of the ratings time the votes for each rating and if the ceiling was higher than the highest rating it would select the highest rating. We have this from the Accuracy value variable stored earlier when calculating the correct predicted against total reviews. This was put in the MLr3 table and the code is at 588-589 of this script. The score was 54.397%, which when comparing to these random forest models with varying modifications for validation and NA imputing is in the same range but not the highest, nor the lowest percent.
 
 
 ```{r}
@@ -3556,7 +3564,7 @@ accuracy10RFModels <- as.data.frame(c(accuracy_rfMod1,
                         accuracy_rfMod4, accuracy_rfMod5,
                         accuracy_rfMod6, accuracy_rfMod7,
                         accuracy_rfMod8, accuracy_rfMod9,
-                        accuracy_rfMod10))
+                        accuracy_rfMod10,Accuracy))
 colnames(accuracy10RFModels) <- 'accuracyResults'
 row.names(accuracy10RFModels) <- c('knnImpute_OOB_5', 
                                    'bagImpute_OOB_5','medianImpute_boot_5',
@@ -3565,7 +3573,8 @@ row.names(accuracy10RFModels) <- c('knnImpute_OOB_5',
                                   'medianImpute_randomSearch_adaptive_cv_5',
                                   'medianImpute_gridSearch_adaptive_cv_5',
                                   'medianImpute_gridSearch_adaptiv_cv_10',
-                                  'medianImpute_randomSearch_adaptive_cv_10')
+                                  'medianImpute_randomSearch_adaptive_cv_10',
+                                  'manualCeilingMedianDifferenceRatios')
 
 accuracy10RFModels
 ```
@@ -3579,136 +3588,187 @@ From here I could clean up the text and run the ratios for each and see if other
 
 
 
-Some previous models from other studies I did, with different data and therefore different names.
-```{r,eval=FALSE}
-knnMod <- train(ROI_Low_High ~ .,
+Lets now test out this same set of ratios of the stopwords in predicting our target variable of the rating value.
+```{r}
+knnMod0 <- train(userRatingValue ~ .,
                 method='knn', preProcess=c('center','scale'),
-                tuneLength=10, trControl=trainControl(method='cv'), data=trainingSet)
-plot(knnMod)
+                tuneLength=10, trControl=trainControl(method='adaptive_cv'),
+                data=trainingSet3)
 
 ```
 
 
-```{r,eval=FALSE}
-rpartMod <- train(ROI_Low_High ~ ., method='rpart', tuneLength=7, data=trainingSet) 
+```{r}
+predKNN0 <- predict(knnMod0, testingSet3)
+dfKNN0 <- data.frame(predKNN0, true=testingSet3$userRatingValue)
+dfKNN0
 
-```
-
-```{r, message=FALSE, warning=FALSE, error=FALSE,eval=FALSE}
-glmMod <- train(ROI_Low_High ~ ., 
-                method='glm', data=trainingSet) 
-```
-
-
-```{r,eval=FALSE}
-predKNN <- predict(knnMod, testingSet)
-predRPART <- predict(rpartMod, testingSet)
-predGLM <- predict(glmMod, testingSet)
+sumKNN0 <- sum(predKNN0==testingSet3$userRatingValue) 
+lengthKNN0 <- length(testingSet3$userRatingValue)
+accuracy_knnMod0 <- (sumKNN0/lengthKNN0) 
+head(accuracy_knnMod0,30)
 
 ```
 
 
-```{r,eval=FALSE}
-length=length(testingSet$ROI_Low_High)
-
-sumKNN <- sum(predKNN==testingSet$ROI_Low_High)
-sumRPart <- sum(predRPART==testingSet$ROI_Low_High)
-sumGLM <- sum(predGLM==testingSet$ROI_Low_High)
+```{r}
+rpartMod0 <- train(userRatingValue ~ ., method='rpart', tuneLength=7, data=trainingSet3) 
 
 ```
 
-```{r,eval=FALSE}
-accuracy_KNN <- sumKNN/length 
-accuracy_RPART <- sumRPart/length 
-accuracy_GLM <- sumGLM/length 
+```{r}
+predRPART0 <- predict(rpartMod0, testingSet3)
+dfRPART0 <- data.frame(predRPART0, true=testingSet3$userRatingValue)
+dfRPART0
+
+sumRPART0 <- sum(predRPART0==testingSet3$userRatingValue) 
+lengthRPART0 <- length(testingSet3$userRatingValue)
+accuracy_RPARTMod0 <- (sumRPART0/lengthRPART0) 
+head(accuracy_RPARTMod0,30)
 
 ```
 
 
-```{r,eval=FALSE}
-predDF2 <- data.frame(predRF,predKNN,predRPART,predGLM, 
-                      TYPE=testingSet$ROI_Low_High)
-colnames(predDF2) <- c('RandomForest','KNN','Rpart','GLM','TrueValue')
 
-results <- c(round(accuracy_rfMod,2),  
-             round(accuracy_KNN,2), 
-             round(accuracy_RPART,2),
-             round(accuracy_GLM,2), 
-             round(100,2))
+```{r}
 
-results <- as.factor(results)
-results <- t(data.frame(results))
-colnames(results) <- c('RandomForest','KNN','Rpart','GLM','TrueValue')
-Results <- rbind(predDF2, results) 
+RFtunes <- cbind(predDF1[1],predDF2[1],predDF3[1],
+             predDF4[1],predDF5[1],predDF6[1],
+             predDF7[1],predDF8[1],predDF9[1],
+             predDF10[1])
+ManualMean <- Reviews15_results$finalPrediction[-inTrain]
+
+predDF11 <- data.frame(RFtunes,ManualMean,dfKNN0[1],dfRPART0[1], 
+                      true=testingSet3$userRatingValue)
+#the following column name assignment doesn't change the name as intended
+colnames(predDF11[12:14]) <-c('predKNN','predRPART','trueValue')
+
+results <- as.data.frame(c(round(accuracy_knnMod0,2), 
+             round(accuracy_RPARTMod0,2),
+             round(100,2)))
+colnames(results) <- 'results'
+
+results$results <- as.factor(paste(results$results))
+
+results1 <- as.data.frame(t(results))
+colnames(results1) <- colnames(predDF11[12:14])
+
+acc11 <- as.data.frame(accuracy10RFModels)
+colnames(acc11) <- 'results'
+acc11$results <- round(acc11$results,2)
+acc11$results <- as.factor(paste(acc11$results))
+names1 <- colnames(predDF11)[1:10]
+row.names(acc11) <- c(names1,'ManualMean')
+acc11RFs <- as.data.frame(t(acc11))
+
+resultsAll <- cbind(acc11RFs,results1)
+Results <- rbind(predDF11, resultsAll) 
+#the column names have to be changed here as well
+colnames(Results)[12:13] <- c('predKNN','predRPART')
 Results
 ```
 
-```{r,eval=FALSE}
-#Now the analytics can be done, using the same packages
-set.seed(189678345) # this will reproduce the same numbers each time sampling is done
-# run set.seed value to get exact results, otherwise results differ
 
-# creates a partition of the data by indices
-inTrain <- createDataPartition(y=MAJ10$TYPE, p=0.7, list=FALSE)#85
+```{r}
 
-trainingSet <- MAJ10[inTrain,]#85X7
-testingSet <- MAJ10[-inTrain,]#36X7
-
-# randomForest, cross-validation (cv) = 5
-rfMod <- train(TYPE~., method='rf', data=(trainingSet), 
-               trControl=trainControl(method='cv'), number=5)
-plot(rfMod)
+# The Random Forest package
+rfpkg <- randomForest(userRatingValue~., data=trainingSet3, method='class')
+predRFpkg <- predict(rfpkg, testingSet3, type='class')
+sumRFpkg <- sum(predRFpkg==testingSet3$userRatingValue)
+lengthRFpkg <- length(testingSet3$userRatingValue)
+accuracy_RFpkg <- sumRFpkg/lengthRFpkg 
+# confusionMatrix(predRFpkg, testingSet3$userRatingValue)
 
 # generalizedBoostedModel
-gbmMod <- train(TYPE~., method='gbm', data=trainingSet, verbose=FALSE )
-
-plot(gbmMod)
+gbmMod <- train(userRatingValue~., method='gbm', data=trainingSet3, verbose=FALSE )
+predGbm <- predict(gbmMod, testingSet3)
+sumGBM0 <- sum(predGbm==testingSet3$userRatingValue)
+lengthGBM0 <- length(testingSet3$userRatingValue)
+accuracy_gbmMod <- sumGBM0/lengthGBM0 
 
 
 # linkage dirichlet allocation model
-ldaMod <- train(TYPE~., method='lda', data=trainingSet)
+ldaMod <- train(userRatingValue~., method='lda', data=trainingSet3)
+predlda <- predict(ldaMod, testingSet3)
+sumLDA0 <- sum(predlda==testingSet3$userRatingValue)
+lengthLDA0 <- length(testingSet3$userRatingValue)
+accuracy_ldaMod <- sumLDA0/lengthLDA0 
 
-# the ldaMod cannot be plotted, 'no tuning parameters for this model'
 
-# run predictions on the testing set
-predRF <- predict(rfMod, testingSet)
-predGbm <- predict(gbmMod, testingSet)
-predlda <- predict(ldaMod, testingSet)
+CombinedGAM <- train(true~., method='gam', data=predDF11)
+CombinedGAMPredictions <- predict(CombinedGAM, predDF11)
 
-predDF <- data.frame(predRF, predGbm, predlda, type=testingSet$TYPE)
-predDF
+predDF12 <- data.frame(predDF11[1:13], predRFpkg, predGbm, predlda,
+                       CombinedGAMPredictions,
+                     true=testingSet3$userRatingValue)
 
-CombinedModels <- train(type~., method='gam', data=predDF)
-CombinedPredictions <- predict(CombinedModels, predDF)
-CombinedPredictions
+sumCP <- sum(CombinedGAMPredictions==testingSet3$userRatingValue)
+lengthCP <- length(testingSet3$userRatingValue)
+accuracy_CP1 <- sumCP/lengthCP
 
-sum <- sum(CombinedPredictions==testingSet$TYPE)#30
-length <- length(testingSet$TYPE)#36
-accuracy_CP1 <- sum/length #0.833
+results3 <- as.data.frame(c(accuracy_RFpkg, accuracy_gbmMod, 
+                            accuracy_ldaMod, accuracy_CP1, round(100,2)))
+colnames(results3) <- 'results'
 
-sum <- sum(predRF==testingSet$TYPE) #26
-length <- length(testingSet$TYPE)#36
-accuracy_rfMod <- (sum/length) #0.722
+results3$results <- round(results3$results,2)
+results3$results <- as.factor(paste(results3$results))
+results4 <- as.data.frame(t(results3))
+colnames(results4) <- colnames(predDF12)[14:18]
 
-sum <- sum(predGbm==testingSet$TYPE)#21
-accuracy_gbmMod <- sum/length # 0.583
+results5 <- cbind(resultsAll[1:13],results4)
+accuracyAllResults <- rbind(predDF12,results5)
 
-sum <- sum(predlda==testingSet$TYPE) #29
-accuracy_ldaMod <- sum/length #0.805
+write.csv(accuracyAllResults,'accuracyAllResults.csv',row.names=TRUE)
 
-rf2 <- randomForest(TYPE~., data=trainingSet, method='class')
-
-plot(rf2)
-
-predRF2 <- predict(rf2, testingSet, type='class')
-
-sum <- sum(predRF2==testingSet$TYPE)#25
-accuracy_RF2 <- sum/length # 0.6944
-
-confusionMatrix(predRF2, testingSet$TYPE)
-predDF2 <- data.frame(predRF, predRF2, predlda, predGbm, TYPE=testingSet$TYPE)
-
-CombinedModels2 <- train(TYPE~., method='gam', data=predDF2)
-CombinedPredictions2 <- predict(CombinedModels2, predDF2)
-CombinedPredictions2
+topbottom <- accuracyAllResults[c(1:10,175:184),]
+topbottom
 ```
+
+The combined model method of 'gam' in the caret package to train the data is supposed to look at all the predicted results and vote on the best value. There is some tuning that needs to be done, or else it is unable to classify more than two classes, hence the 1s and 2s for each prediction. It's accuracy is 10%, the others ranged from 49-57% in accuracy.
+
+Use regression instead of classification for Generalized Linear Machines, temporarily change the target to a numeric instead of factor data type.
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+
+# glmMod0 <- train(userRatingValue ~ ., metric='Accuracy',
+#                 method='glm', data=trainingSet3) 
+
+############################
+trainingSet3$userRatingValue <- as.numeric(paste(trainingSet3$userRatingValue))
+testingSet3$userRatingValue <- as.numeric(paste(testingSet3$userRatingValue))
+
+glmMod0 <- train(userRatingValue ~ .,
+                method='glm', data=trainingSet3)
+
+```
+The above isn't letting the glm method for linear classification be used, even with the target turned into a numeric data type and using the metric 'Kappa' or 'Accuracy' for classification. So it will be omitted, it was working with a rounded output of 27% accuracy, but then it stopped working all together when re-ran again. 
+
+
+```{r}
+
+predGLM0 <- predict(glmMod0, testingSet3) #a numeric vector data type
+
+
+dfGLM0 <- data.frame(predGLM0,
+                       type=testingSet3$userRatingValue)
+dfGLM0$predGLM0 <- round(dfGLM0$predGLM0,0)
+dfGLM0$predGLM0 <- ifelse(dfGLM0$predGLM0>5,5,dfGLM0$predGLM0)
+dfGLM0$predGLM0 <- as.factor(paste(dfGLM0$predGLM0))
+head(dfGLM0)
+```
+
+```{r}
+sumGLM0 <- sum(dfGLM0$predGLM0==testingSet3$userRatingValue)
+lengthGLM0 <- length(testingSet3$userRatingValue)
+accuracy_GLMMod0 <- (sumGLM0/lengthGLM0)
+accuracy_GLMMod0
+
+```
+We see that the generalized linear model didn't see a noticeable way the ratios are connected to the outputs, and the accuracy was the worst with 28% accuracy. Worse than any of all the random forest tuned variations of models, the topic modeler Latent Dirichlet Allocation, the generalized boosted machines, the k-nearest neighbor, the recursive partitioned trees, except for the gam voting model that scored 10%. Lets change the target back to a factor data type.
+```{r}
+testingSet3$userRatingValue <- as.factor(paste(testingSet3$userRatingValue))
+trainingSet3$userRatingValue <- as.factor(paste(trainingSet3$userRatingValue))
+```
+
+
+What is left to do from here would be to change out the original filtering of top words and exclude the stopwords in the prepocessing step where we built the document term matrices, and also for the manual program we built to replace all searched words to those 12 words that are top for each rating when all stopwords are not included. This will be a separate file and not an attachment.
