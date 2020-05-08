@@ -1,0 +1,3178 @@
+---
+title: "Massage Modality Recommender System"
+author: "Janis Corona"
+date: "4/29/2020"
+output: html_document
+---
+
+There are two parts to this script. The first part uses the R package reticulate to run python 3 code on a dataset of massage modalities' benefits and separately contraindications for single user inputs on massage request based on his or her massage goals. But after testing the machine learning on predicting the modality of 24 duplicates each of these 19 categories of massage. The tests are 100%, as they should be because every unique massage modality is the same exact description, word for word. This was done so that when splitting the training and testing sets there wouldn't be any left out categories, and therefore left out predictions, that would throw off the accuracy and the recall and precision. 
+
+Another prior version before the last version was done to test this accuracy, and all of the hot stone massages were misclassified as deep tissue massage but all deep tissue massage categories were identified as such correctly making the recall 100% for deep tissue, but zero for hot stone thereapy, and zero precision for hot stone therapy and 33% precision for deep tissue, with an overall accuracy of 94%. This error was fixed by fixing the underlying data. 
+
+This script uses 19 classes of massage therapy and massage modalities or enhancements (elevations) to recommend a massage for a client after excluding all other massage modalities based on the contraindications for each massage modality then benefit of each massage modality needed after excluding a user contraindicated modality based on brief health declarations of the user requesting a massage.This is a program built based on the tokenized lists read in from the python script (in this script using reticulate), and functions to grab a user input and run through a grand function that tokenizes the user input by lemmatizing it, then using the same ngrams of 2 for benefits and 3 for contraindications as was done in the python script using the nltk python module. But here, the tokens and lemmatization in R use the R packages tidytext and textstem respectively. All stop words were also removed and punctuations and made all lowercase. This function then builds a list on contraindicated massages based on user input tokens, and from those tokens creates a list of recommended probabilites for a modality that it then excludes the contraindicated modalities from all based on user defined tokens. A table of probabilities for each available modality for the user that is not in the list of contraindicated modalities is returned, and the top choices (3) of the massage.
+
+This version 2 will then return the massage modality top choices' description, benefits, and possible side effects.
+
+- [Random Forest Trees user input generated results](#random-forest-trees-user-input-generated-results)
+
+- [Gradient Boosted Trees user input generated results](#gradient-boosted-trees-user-input-generated-results)
+
+- [The massage recommender tokenized program](#massage-recommender-R)
+
+- [The Massage Recommender Program](#the-massage-recommender-program)
+
+- [Version 1 finished program](#version-1)
+
+- [Version 2 finished program](#version-2)
+
+- [Keras DNNs as a superb Predictor Model](#tensorFlow-keras-for-deep-neural-network-predictions)
+]
+
+```{r}
+modes <- read.csv('MassageModalities3.csv', sep=',', header=TRUE, na.strings=c('',' ','NA'))
+colnames(modes)[1] <- 'modality'
+head(modes)
+```
+
+Lets create a table from the one above of only unique or non-duplicated entries to use in our program later when returning the description and side effects of each recommended massage.
+```{r}
+modesUnique <- modes[!duplicated(modes$modality),c(1,2,3,5)]
+```
+
+Lets use python 3 to tokenize the contraindications into three adjacent word pairs, and to tokenize the the benefits into two adjacent word pairs using the ngrams tokenization method.
+```{r}
+library(reticulate)
+library(dplyr)
+library(stringr)
+library(tm)
+library(textstem)
+library(tidytext)
+library(tidyverse)
+```
+
+```{r}
+conda_list(conda = "auto") 
+
+```
+
+
+```{r}
+use_condaenv(condaenv = "python36")
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+import pandas as pd 
+import matplotlib.pyplot as plt 
+from textblob import TextBlob 
+import sklearn 
+import numpy as np 
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer 
+from sklearn.naive_bayes import MultinomialNB 
+from sklearn.metrics import classification_report, f1_score, accuracy_score, confusion_matrix 
+
+import re
+import string
+import nltk 
+
+np.random.seed(47) 
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+modes = pd.read_csv('MassageModalities3.csv', encoding = 'unicode_escape') 
+print(modes.head())
+print(modes.columns)
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+print(modes['modality'].unique())
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+import numpy as np
+
+modes = modes.reindex(np.random.permutation(modes.index))
+
+print(modes.head())
+print(modes.tail())
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+modes.groupby('modality').describe()
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+stopwords = nltk.corpus.stopwords.words('english')
+ps=nltk.PorterStemmer()
+wn=nltk.WordNetLemmatizer()
+```
+
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+def lemmatize(text):
+    text="".join([word.lower() for word in text if word not in string.punctuation])
+    tokens=re.split('\W+', text)
+    text=" ".join([wn.lemmatize(word) for word in tokens if word not in stopwords])#unlisted with N-grams vectorization
+    #text=[wn.lemmatize(word) for word in tokens if word not in stopwords]#when using count Vectorization its a list
+    #or else single letters returned.
+    return text
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+modes['lemmatizedBenefits']=modes['benefits'].apply(lambda x: lemmatize(x))
+modes['lemmatizedContraindications']=modes['contraindications'].apply(lambda x: lemmatize(x))
+
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+modes.columns
+```
+
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+modes.head()
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+from sklearn.model_selection import train_test_split
+
+X_train,X_test,y_train,y_test=train_test_split(modes[['lemmatizedContraindications','lemmatizedBenefits']],modes['modality'],test_size=0.15)
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+X_train.head()
+```
+
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+from sklearn.feature_extraction.text import CountVectorizer
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+n_gram3_vect=CountVectorizer(ngram_range=(3,3))
+n_gram2_vect=CountVectorizer(ngram_range=(2,2))
+
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+type(X_train['lemmatizedBenefits'])
+X_train['lemmatizedBenefits'].head()
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+type(X_train['lemmatizedContraindications'])
+X_train['lemmatizedContraindications'].head()
+```
+
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+n_gram3_vect_fit=n_gram3_vect.fit(X_train['lemmatizedContraindications'])
+n_gram2_vect_fit=n_gram2_vect.fit(X_train['lemmatizedBenefits'])
+
+
+n_gram3_train=n_gram3_vect_fit.transform(X_train['lemmatizedContraindications'])
+n_gram3_test=n_gram3_vect_fit.transform(X_test['lemmatizedContraindications'])
+n_gram2_train=n_gram2_vect_fit.transform(X_train['lemmatizedBenefits'])
+n_gram2_test=n_gram2_vect_fit.transform(X_test['lemmatizedBenefits'])
+
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+print(len(n_gram3_vect_fit.get_feature_names()))
+Ngram3 = n_gram3_vect_fit.get_feature_names()
+print(Ngram3)
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+print(len(n_gram2_vect_fit.get_feature_names()))
+Ngram2 = n_gram2_vect_fit.get_feature_names()
+print(type(Ngram2))
+print(Ngram2)
+
+```
+
+```{python}
+n_gram3_train_df=pd.concat([X_train[['lemmatizedContraindications','lemmatizedBenefits']].reset_index(drop=True),pd.DataFrame(n_gram3_train.toarray())],axis=1)
+
+n_gram3_test_df=pd.concat([X_test[['lemmatizedContraindications','lemmatizedBenefits']].reset_index(drop=True),pd.DataFrame(n_gram3_test.toarray())],axis=1)
+
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+n_gram3_train_df.head()
+```
+
+
+```{python}
+n_gram2_train_df=pd.concat([X_train[['lemmatizedContraindications','lemmatizedBenefits']].reset_index(drop=True),pd.DataFrame(n_gram2_train.toarray())],axis=1)
+
+n_gram2_test_df=pd.concat([X_test[['lemmatizedContraindications','lemmatizedBenefits']].reset_index(drop=True),pd.DataFrame(n_gram2_test.toarray())],axis=1)
+
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+n_gram2_train_df.head()
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+
+n_gram2_train2=pd.DataFrame(n_gram2_train.toarray())
+n_gram3_train3=pd.DataFrame(n_gram3_train.toarray())
+n_gram2_test2=pd.DataFrame(n_gram2_test.toarray())
+n_gram3_test3=pd.DataFrame(n_gram3_test.toarray())
+
+n_gram3_train3.columns=Ngram3
+n_gram2_train2.columns=Ngram2
+n_gram3_test3.columns=Ngram3
+n_gram2_test2.columns=Ngram2
+
+
+n_gram_2_3_train_df=pd.concat([X_train[['lemmatizedContraindications','lemmatizedBenefits']].reset_index(drop=True),n_gram2_train2,n_gram3_train3],axis=1)
+
+n_gram_2_3_test_df=pd.concat([X_test[['lemmatizedContraindications','lemmatizedBenefits']].reset_index(drop=True),n_gram2_test2,n_gram3_test3],axis=1)
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+ngram23Train = pd.concat([n_gram2_train2,n_gram3_train3],axis=1)
+ngram23Test = pd.concat([n_gram2_test2,n_gram3_test3],axis=1)
+ngram23Train.head()
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+n_gram_2_3_train_df.head()
+```
+
+Write this table of ngram tokens out to csv.
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+n_gram_2_3_test_df.to_csv('ngrams2_3_test.csv',index=False)
+n_gram_2_3_train_df.to_csv('ngrams2_3_train.csv', index=False)
+y_train.to_csv('y_train_ngrams23.csv', index=False)
+y_test.to_csv('y_test_ngrams23.csv', index=False)
+```
+
+Lets read in this large file in RStudio, and combine the data into one table.
+```{r}
+ngrams23train <- read.csv('ngrams2_3_train.csv', sep=',', header=TRUE, 
+                          na.strings=c('',' ','NA'))
+ngrams23test <- read.csv('ngrams2_3_test.csv', sep=',', header=TRUE,
+                         na.strings=c('',' ','NA'))
+ytrain <- read.csv('y_train_ngrams23.csv', sep=',', header=FALSE,
+                   na.strings=c('',' ','NA'))
+colnames(ytrain) <- 'modality'
+ytest <- read.csv('y_test_ngrams23.csv', sep=',', header=FALSE,
+                  na.strings=c('',' ','NA'))
+colnames(ytest) <- 'modality'
+
+train <- cbind(ytrain,ngrams23train)
+test <- cbind(ytest,ngrams23test)
+
+ngrams23All <- rbind(train,test)
+
+write.csv(ngrams23All,'lemmNgramsBenefits2Contraindications3.csv', row.names=FALSE)
+```
+
+We now have the lemmatized ngram tokens of 2 adjacent word pairs for our benefits and three adjacent word pairs for our contraindications saved to csv to use later or as needed for building our recommender system for a specific massage modality.
+
+Lets get back to python, for machine learning using our previous models for the random forest classifier and the gradient boosted trees classifier. Lets use the combined tokens for the benefits and contraindications to see how well these trees do in classifying our massage modalities.
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import precision_recall_fscore_support as score
+import time
+```
+
+
+```{python}
+rf=RandomForestClassifier(n_estimators=150, max_depth=None, n_jobs=-1)
+start=time.time()
+rf_model=rf.fit(ngram23Train,y_train)
+end=time.time()
+fit_time=(end-start)
+fit_time
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+start=time.time()
+y_pred=rf_model.predict(ngram23Test)
+end=time.time()
+pred_time=(end-start)
+pred_time
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+
+prd = pd.DataFrame(y_pred)
+prd.columns=['Predicted']
+
+prd.index=y_test.index
+pred=pd.concat([pd.DataFrame(prd),y_test],axis=1)
+print(pred)
+
+```
+
+# Results Random Forest
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+from sklearn.metrics import classification_report, f1_score, accuracy_score, confusion_matrix 
+
+print('accuracy', accuracy_score(y_test, y_pred))
+print('confusion matrix\n', confusion_matrix(y_test, y_pred))
+print('(row=expected, col=predicted)')
+
+print(classification_report(y_test, y_pred))
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+gb=GradientBoostingClassifier(n_estimators=150,max_depth=11)
+start=time.time()
+gb_model=gb.fit(ngram23Train,y_train)
+end=time.time()
+fit_time=(end-start)
+fit_time
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+start=time.time()
+y_pred=gb_model.predict(ngram23Test)
+end=time.time()
+pred_time=(end-start)
+pred_time
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+prd = pd.DataFrame(y_pred)
+prd.columns=['Predicted']
+
+prd.index=y_test.index
+pred=pd.concat([pd.DataFrame(prd),y_test],axis=1)
+print(pred)
+```
+
+# Results Gradient Boosted Trees
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+from sklearn.metrics import classification_report, f1_score, accuracy_score, confusion_matrix 
+
+print('accuracy', accuracy_score(y_test, y_pred))
+print('confusion matrix\n', confusion_matrix(y_test, y_pred))
+print('(row=expected, col=predicted)')
+
+print(classification_report(y_test, y_pred))
+```
+
+It is great that these two produced the same results of 100%, as they should because each class of modality is a duplicate up to 23 duplicates, or 24 samples of each modality that are all identical. I ran a previous script on the same data and used 1-4 ngrams and the hot stone therapy observations were all getting misclassified as deep tissue recommendations for benefits and the same for contraindications of each type.
+
+Lets try user inputs using this data after we make the above into a function for both models.
+```{python}
+
+def lemmatize(text):
+    text="".join([word.lower() for word in text if word not in string.punctuation])
+    tokens=re.split('\W+', text)
+    text=" ".join([wn.lemmatize(word) for word in tokens if word not in stopwords])
+    return text
+    
+def predict_ngramRFC_lemma(new_review): 
+    nr=pd.DataFrame([new_review])
+    nr.columns=['newReview']
+    nr['lemma']=nr['newReview'].apply(lambda x: lemmatize(x))
+    
+    rf=RandomForestClassifier(n_estimators=150, max_depth=None, n_jobs=-1)
+    n_gram2_vect=CountVectorizer(ngram_range=(2,2))
+    n_gram3_vect=CountVectorizer(ngram_range=(3,3))
+
+
+    n_gram2_vect_fit=n_gram2_vect.fit(X_train['lemmatizedBenefits'])
+    n_gram3_vect_fit=n_gram3_vect.fit(X_train['lemmatizedContraindications'])
+
+
+    n_gram2_train=n_gram2_vect_fit.transform(X_train['lemmatizedBenefits'])
+    n_gram3_train=n_gram3_vect_fit.transform(X_train['lemmatizedContraindications'])
+
+    Ngram2 = n_gram2_vect_fit.get_feature_names()
+    Ngram3 = n_gram3_vect_fit.get_feature_names()
+
+    n_gram2_train2=pd.DataFrame(n_gram2_train.toarray())
+    n_gram3_train3=pd.DataFrame(n_gram3_train.toarray())
+
+    n_gram2_train2.columns=Ngram2
+    n_gram3_train3.columns=Ngram3
+
+    ngram23Train = pd.concat([n_gram2_train2,n_gram3_train3],axis=1)
+
+    nr_gram2_test=n_gram2_vect_fit.transform(nr['lemma'])
+    nr_gram3_test=n_gram3_vect_fit.transform(nr['lemma'])
+   
+    nr_test2=pd.DataFrame(nr_gram2_test.toarray())
+    nr_test3=pd.DataFrame(nr_gram3_test.toarray())
+    
+    nr_test2.columns=Ngram2
+    nr_test3.columns=Ngram3
+
+    nrTest = pd.concat([nr_test2,nr_test3],axis=1)
+    
+    model = rf.fit(ngram23Train,y_train)
+    pred=pd.DataFrame(model.predict(nrTest))
+    pred.columns=['Recommended Healthcare Service:']
+    pred.index= ['lemmatized_2ngram3_RFC_85-15:']
+    print('\n\n',pred)
+```
+
+```{python} 
+np.random.seed(12345)
+predict_ngramRFC_lemma('I need a massage!') 
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+np.random.seed(12345)
+
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+
+def lemmatize(text):
+    text="".join([word.lower() for word in text if word not in string.punctuation])
+    tokens=re.split('\W+', text)
+    text=" ".join([wn.lemmatize(word) for word in tokens if word not in stopwords])
+    return text
+    
+
+def predict_ngramGBC_lemma(new_review): 
+    nr=pd.DataFrame([new_review])
+    nr.columns=['newReview']
+    nr['lemma']=nr['newReview'].apply(lambda x: lemmatize(x))
+
+    gb=GradientBoostingClassifier(n_estimators=150,max_depth=11)
+    n_gram2_vect=CountVectorizer(ngram_range=(2,2))
+    n_gram3_vect=CountVectorizer(ngram_range=(3,3))
+
+
+    n_gram2_vect_fit=n_gram2_vect.fit(X_train['lemmatizedBenefits'])
+    n_gram3_vect_fit=n_gram3_vect.fit(X_train['lemmatizedContraindications'])
+
+
+    n_gram2_train=n_gram2_vect_fit.transform(X_train['lemmatizedBenefits'])
+    n_gram3_train=n_gram3_vect_fit.transform(X_train['lemmatizedContraindications'])
+
+    Ngram2 = n_gram2_vect_fit.get_feature_names()
+    Ngram3 = n_gram3_vect_fit.get_feature_names()
+
+    n_gram2_train2=pd.DataFrame(n_gram2_train.toarray())
+    n_gram3_train3=pd.DataFrame(n_gram3_train.toarray())
+
+    n_gram2_train2.columns=Ngram2
+    n_gram3_train3.columns=Ngram3
+
+
+    ngram23Train = pd.concat([n_gram2_train2,n_gram3_train3],axis=1)
+
+    nr_gram2_test=n_gram2_vect_fit.transform(nr['lemma'])
+    nr_gram3_test=n_gram3_vect_fit.transform(nr['lemma'])
+   
+    nr_test2=pd.DataFrame(nr_gram2_test.toarray())
+    nr_test3=pd.DataFrame(nr_gram3_test.toarray())
+    
+    nr_test2.columns=Ngram2
+    nr_test3.columns=Ngram3
+
+    nrTest = pd.concat([nr_test2,nr_test3],axis=1)
+
+    model = gb.fit(ngram23Train,y_train)
+    pred=pd.DataFrame(model.predict(nrTest))
+    pred.columns=['Recommended Healthcare Service:']
+    pred.index= ['lemmatized_2ngram3_GBC_85-15:']
+    print('\n\n',pred)
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+np.random.seed(12345)
+
+predict_ngramGBC_lemma('I need a massage!')
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+np.random.seed(12345)
+
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+That was pretty interesting, to see the different recommendations. Since many of the contraindications and benefits are the same between modalities, these simple user inputs produced the same results with the seed set. If I remove the seed or starting point to randomize within the operating system, then lets see how this knits.
+
+
+# Gradient Boosted Trees user input generated results
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramGBC_lemma('I need a massage!')
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramGBC_lemma('I need a massage!')
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramGBC_lemma('I need a massage!')
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramGBC_lemma('I need a massage!')
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramGBC_lemma('I need a massage!')
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+# Random Forest Trees user input generated results
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramRFC_lemma('I need a massage!')
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramRFC_lemma('I need a massage!')
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramRFC_lemma('I need a massage!')
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramRFC_lemma('I need a massage!')
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramRFC_lemma('I need a massage!')
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}    
+predict_ngramRFC_lemma('I need a massage!')
+```
+
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramRFC_lemma('I have been working out a lot more than normal and am sore all over. Feels like a car hit me. I can\'t touch my toes to tie my shoes and my neck won\'t turn to the right. Help me.')
+
+```
+
+
+Wonderful! But now lets try to get some of the modalities other than CBD, biofreeze, aromatherapy, stretching, and lymphatic drainage massage. Those are more additional therapeutics for massage therapy.
+
+```{python,error=FALSE,message=FALSE,warning=FALSE,FutureWarning=FALSE}
+predict_ngramGBC_lemma('I want either a Swedish or Deep Tissue massage, I want a lot of pressure, and need to fall asleep, I workout, have stress at work, alright with some hot stones or cold stones, or added cups.')
+```
+
+
+
+Our next model will use ngrams on the modality description to better capture the tokenized words for each modality, and keep the bigrams on benefits and trigrams on contraindications.Also, there should be a filter system so that those contraindicated massage modalities are excluded from the next run using the benefits or expectations of a user. These choices are selecting both benefits and those massages contraindicated with the current design. This did make the prediction on the testing set 100% accurate as it should, because only using benefits or contraindications tokenized produced a precision error on classifying hot stone therapy as deep tissue massage from a previous script done in Jupyter Notebook for python.
+
+
+***
+
+# Massage Recommender R
+
+Lets switch to R and read in the lemmatized tokens of the benefits and contraindications.
+```{r}
+ngrams23All <- read.csv('lemmNgramsBenefits2Contraindications3.csv', sep=',', header=TRUE,
+                        na.strings=c('',' ','NA'))
+```
+
+```{r}
+unique(ngrams23All$modality)
+
+```
+
+```{r}
+myofascial <- subset(ngrams23All, ngrams23All$modality=='Myofascial Massage')
+dim(myofascial)
+```
+
+```{r}
+myofascial1 <- myofascial[,-c(1:3)]
+myofascial2 <- subset(myofascial1, colSums(myofascial1)!=0)
+dim(myofascial2)
+```
+```{r}
+myofascial2 <- myofascial1[,colSums(myofascial1) >= 1]
+colSums(myofascial2)
+```
+
+```{r}
+contraMyo <- grep('[.].*[.].*',colnames(myofascial2))
+myoContra <- myofascial2[,contraMyo]
+myoBenefit <- myofascial2[,-contraMyo]
+```
+
+We now have the benefits as bigrams and contraindications as trigrams to 
+exclude this as a list of the myofascial therapy contraindications, and to 
+recommend the list of myofascial benefits. We just have to make these column names
+into lists for benefits and contraindications.
+```{r}
+benefits_myofascial <- gsub('[.]',' ', colnames(myoBenefit), perl=TRUE)
+contra_myofascial <- gsub('[.]',' ', colnames(myoContra), perl=TRUE)
+```
+
+We will make the lists of the other 18 categories of massage modalities' benefits and contraindications to use in building our recommender system for massage modalities for each user.
+
+Prenatal Massage
+```{r}
+prenatal <- subset(ngrams23All, ngrams23All$modality=='Prenatal Massage')
+
+prenatal1 <- prenatal[,-c(1:3)]
+prenatal2 <- subset(prenatal1, colSums(prenatal1)!=0)
+
+prenatal2 <- prenatal1[,colSums(prenatal1) >= 1]
+
+contraPre <- grep('[.].*[.].*',colnames(prenatal2))
+PreContra <- prenatal2[,contraPre]
+PreBenefit <- prenatal2[,-contraPre]
+
+benefits_prenatal <- gsub('[.]',' ', colnames(PreBenefit), perl=TRUE)
+contra_prenatal <- gsub('[.]',' ', colnames(PreContra), perl=TRUE)
+
+```
+
+Shiatsu Massage
+```{r}
+shiatsu <- subset(ngrams23All, ngrams23All$modality=='Shiatsu Massage')
+
+shiatsu1 <- shiatsu[,-c(1:3)]
+shiatsu2 <- subset(shiatsu1, colSums(shiatsu1)!=0)
+
+shiatsu2 <- shiatsu1[,colSums(shiatsu1) >= 1]
+
+contrashi <- grep('[.].*[.].*',colnames(shiatsu2))
+shiContra <- shiatsu2[,contrashi]
+shiBenefit <- shiatsu2[,-contrashi]
+
+benefits_shiatsu <- gsub('[.]',' ', colnames(shiBenefit), perl=TRUE)
+contra_shiatsu <- gsub('[.]',' ', colnames(shiContra), perl=TRUE)
+
+```
+
+Hot Stone Therapy Massage
+```{r}
+hotStone <- subset(ngrams23All, ngrams23All$modality=='Hot Stone Therapy Massage')
+
+hotStone1 <- hotStone[,-c(1:3)]
+hotStone2 <- subset(hotStone1, colSums(hotStone1)!=0)
+
+hotStone2 <- hotStone1[,colSums(hotStone1) >= 1]
+
+contrahs <- grep('[.].*[.].*',colnames(hotStone2))
+hsContra <- hotStone2[,contrahs]
+hsBenefit <- hotStone2[,-contrahs]
+
+benefits_hs <- gsub('[.]',' ', colnames(hsBenefit), perl=TRUE)
+contra_hs <- gsub('[.]',' ', colnames(hsContra), perl=TRUE)
+```
+
+Cupping Therapy
+```{r}
+Cupping <- subset(ngrams23All, ngrams23All$modality=='Cupping Therapy')
+
+Cupping1 <- Cupping[,-c(1:3)]
+Cupping2 <- subset(Cupping1, colSums(Cupping1)!=0)
+
+Cupping2 <- Cupping1[,colSums(Cupping1) >= 1]
+
+contracup <- grep('[.].*[.].*',colnames(Cupping2))
+cupContra <- Cupping2[,contracup]
+cupBenefit <- Cupping2[,-contracup]
+
+benefits_cup <- gsub('[.]',' ', colnames(cupBenefit), perl=TRUE)
+contra_cup <- gsub('[.]',' ', colnames(cupContra), perl=TRUE)
+```
+
+Sports Massage
+```{r}
+Sports <- subset(ngrams23All, ngrams23All$modality=='Sports Massage')
+
+Sports1 <- Sports[,-c(1:3)]
+Sports2 <- subset(Sports1, colSums(Sports1)!=0)
+
+Sports2 <- Sports1[,colSums(Sports1) >= 1]
+
+contrasports <- grep('[.].*[.].*',colnames(Sports2))
+sportsContra <- Sports2[,contrasports]
+sportsBenefit <- Sports2[,-contrasports]
+
+benefits_sports <- gsub('[.]',' ', colnames(sportsBenefit), perl=TRUE)
+contra_sports <- gsub('[.]',' ', colnames(sportsContra), perl=TRUE)
+
+```
+
+Biofreeze Muscle Pain Relief Gel
+```{r}
+Freeze <- subset(ngrams23All, ngrams23All$modality=='Biofreeze Muscle Pain Relief Gel')
+
+Freeze1 <- Freeze[,-c(1:3)]
+Freeze2 <- subset(Freeze1, colSums(Freeze1)!=0)
+
+Freeze2 <- Freeze1[,colSums(Freeze1) >= 1]
+
+contrafreeze <- grep('[.].*[.].*',colnames(Freeze2))
+freezeContra <- Freeze2[,contrafreeze]
+freezeBenefit <- Freeze2[,-contrafreeze]
+
+benefits_freeze <- gsub('[.]',' ', colnames(freezeBenefit), perl=TRUE)
+contra_freeze <- gsub('[.]',' ', colnames(freezeContra), perl=TRUE)
+
+```
+
+Cold Stone Therapy
+```{r}
+ColdStone <- subset(ngrams23All, ngrams23All$modality=='Cold Stone Therapy')
+
+ColdStone1 <- ColdStone[,-c(1:3)]
+ColdStone2 <- subset(ColdStone1, colSums(ColdStone1)!=0)
+
+ColdStone2 <- ColdStone1[,colSums(ColdStone1) >= 1]
+
+contracold <- grep('[.].*[.].*',colnames(ColdStone2))
+coldContra <- ColdStone2[,contracold]
+coldBenefit <- ColdStone2[,-contracold]
+
+benefits_cold <- gsub('[.]',' ', colnames(coldBenefit), perl=TRUE)
+contra_cold <- gsub('[.]',' ', colnames(coldContra), perl=TRUE)
+
+```
+
+Stretching
+```{r}
+Stretch <- subset(ngrams23All, ngrams23All$modality=='Stretching')
+
+Stretch1 <- Stretch[,-c(1:3)]
+Stretch2 <- subset(Stretch1, colSums(Stretch1)!=0)
+
+Stretch2 <- Stretch1[,colSums(Stretch1) >= 1]
+
+contrastretch <- grep('[.].*[.].*',colnames(Stretch2))
+stretchContra <- Stretch2[,contrastretch]
+stretchBenefit <- Stretch2[,-contrastretch]
+
+benefits_stretch <- gsub('[.]',' ', colnames(stretchBenefit), perl=TRUE)
+contra_stretch <- gsub('[.]',' ', colnames(stretchContra), perl=TRUE)
+
+```
+
+Aromatherapy
+```{r}
+AromaTherapy <- subset(ngrams23All, ngrams23All$modality=='Aromatherapy')
+
+AromaTherapy1 <- AromaTherapy[,-c(1:3)]
+AromaTherapy2 <- subset(AromaTherapy1, colSums(AromaTherapy1)!=0)
+
+AromaTherapy2 <- AromaTherapy1[,colSums(AromaTherapy1) >= 1]
+
+contraaroma <- grep('[.].*[.].*',colnames(AromaTherapy2))
+aromaContra <- AromaTherapy2[,contraaroma]
+aromaBenefit <- AromaTherapy2[,-contraaroma]
+
+benefits_aroma <- gsub('[.]',' ', colnames(aromaBenefit), perl=TRUE)
+contra_aroma <- gsub('[.]',' ', colnames(aromaContra), perl=TRUE)
+
+```
+
+Swedish Massage
+```{r}
+Swedish <- subset(ngrams23All, ngrams23All$modality=='Swedish Massage')
+
+Swedish1 <- Swedish[,-c(1:3)]
+Swedish2 <- subset(Swedish1, colSums(Swedish1)!=0)
+
+Swedish2 <- Swedish1[,colSums(Swedish1) >= 1]
+
+contraswedish <- grep('[.].*[.].*',colnames(Swedish2))
+swedishContra <- Swedish2[,contraswedish]
+swedishBenefit <- Swedish2[,-contraswedish]
+
+benefits_swedish <- gsub('[.]',' ', colnames(swedishBenefit), perl=TRUE)
+contra_swedish <- gsub('[.]',' ', colnames(swedishContra), perl=TRUE)
+
+```
+
+Deep tissue Massage
+```{r}
+DTmassage <- subset(ngrams23All, ngrams23All$modality=='Deep tissue Massage')
+
+DTmassage1 <- DTmassage[,-c(1:3)]
+DTmassage2 <- subset(DTmassage1, colSums(DTmassage1)!=0)
+
+DTmassage2 <- DTmassage1[,colSums(DTmassage1) >= 1]
+
+contraDT <- grep('[.].*[.].*',colnames(DTmassage2))
+DTContra <- DTmassage2[,contraDT]
+DTBenefit <- DTmassage2[,-contraDT]
+
+benefits_DT <- gsub('[.]',' ', colnames(DTBenefit), perl=TRUE)
+contra_DT <- gsub('[.]',' ', colnames(DTContra), perl=TRUE)
+
+```
+
+Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage
+```{r}
+IASTM <- subset(ngrams23All, ngrams23All$modality=='Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage')
+
+IASTM1 <- IASTM[,-c(1:3)]
+IASTM2 <- subset(IASTM1, colSums(IASTM1)!=0)
+
+IASTM2 <- IASTM1[,colSums(IASTM1) >= 1]
+
+contrainstrument <- grep('[.].*[.].*',colnames(IASTM2))
+instrumentContra <- IASTM2[,contrainstrument]
+instrumentBenefit <- IASTM2[,-contrainstrument]
+
+benefits_instrument <- gsub('[.]',' ', colnames(instrumentBenefit), perl=TRUE)
+contra_instrument <- gsub('[.]',' ', colnames(instrumentContra), perl=TRUE)
+
+```
+
+Trigger Point Therapy
+```{r}
+TPT <- subset(ngrams23All, ngrams23All$modality=='Trigger Point Therapy')
+
+TPT1 <- TPT[,-c(1:3)]
+TPT2 <- subset(TPT1, colSums(TPT1)!=0)
+
+TPT2 <- TPT1[,colSums(TPT1) >= 1]
+
+contratpt <- grep('[.].*[.].*',colnames(TPT2))
+tptContra <- TPT2[,contratpt]
+tptBenefit <- TPT2[,-contratpt]
+
+benefits_tpt <- gsub('[.]',' ', colnames(tptBenefit), perl=TRUE)
+contra_tpt <- gsub('[.]',' ', colnames(tptContra), perl=TRUE)
+
+```
+
+Massage Gun Therapy
+```{r}
+massageGun <- subset(ngrams23All, ngrams23All$modality=='Massage Gun Therapy')
+
+massageGun1 <- massageGun[,-c(1:3)]
+massageGun2 <- subset(massageGun1, colSums(massageGun1)!=0)
+
+massageGun2 <- massageGun1[,colSums(massageGun1) >= 1]
+
+contramassagegun <- grep('[.].*[.].*',colnames(massageGun2))
+massagegunContra <- massageGun2[,contramassagegun]
+massagegunBenefit <- massageGun2[,-contramassagegun]
+
+benefits_massagegun <- gsub('[.]',' ', colnames(massagegunBenefit), perl=TRUE)
+contra_massagegun <- gsub('[.]',' ', colnames(massagegunContra), perl=TRUE)
+
+```
+
+Lymphatic Drainage Massage
+```{r}
+Lymphatic <- subset(ngrams23All, ngrams23All$modality=='Lymphatic Drainage Massage')
+
+Lymphatic1 <- Lymphatic[,-c(1:3)]
+Lymphatic2 <- subset(Lymphatic1, colSums(Lymphatic1)!=0)
+
+Lymphatic2 <- Lymphatic1[,colSums(Lymphatic1) >= 1]
+
+contralymphatic <- grep('[.].*[.].*',colnames(Lymphatic2))
+lymphaticContra <- Lymphatic2[,contralymphatic]
+lymphaticBenefit <- Lymphatic2[,-contralymphatic]
+
+benefits_lymphatic <- gsub('[.]',' ', colnames(lymphaticBenefit), perl=TRUE)
+contra_lymphatic <- gsub('[.]',' ', colnames(lymphaticContra), perl=TRUE)
+
+```
+
+Reflexology Massage
+```{r}
+Reflexology <- subset(ngrams23All, ngrams23All$modality=='Reflexology Massage')
+
+Reflexology1 <- Reflexology[,-c(1:3)]
+Reflexology2 <- subset(Reflexology1, colSums(Reflexology1)!=0)
+
+Reflexology2 <- Reflexology1[,colSums(Reflexology1) >= 1]
+
+contrareflexology <- grep('[.].*[.].*',colnames(Reflexology2))
+reflexologyContra <- Reflexology2[,contrareflexology]
+reflexologyBenefit <- Reflexology2[,-contrareflexology]
+
+benefits_reflexology <- gsub('[.]',' ', colnames(reflexologyBenefit), perl=TRUE)
+contra_reflexology <- gsub('[.]',' ', colnames(reflexologyContra), perl=TRUE)
+
+```
+
+Craniosacral Massage
+```{r}
+Craniosacral <- subset(ngrams23All, ngrams23All$modality=='Craniosacral Massage')
+
+Craniosacral1 <- Craniosacral[,-c(1:3)]
+Craniosacral2 <- subset(Craniosacral1, colSums(Craniosacral1)!=0)
+
+Craniosacral2 <- Craniosacral1[,colSums(Craniosacral1) >= 1]
+
+contracraniosacral <- grep('[.].*[.].*',colnames(Craniosacral2))
+craniosacralContra <- Craniosacral2[,contracraniosacral]
+craniosacralBenefit <- Craniosacral2[,-contracraniosacral]
+
+benefits_craniosacral <- gsub('[.]',' ', colnames(craniosacralBenefit), perl=TRUE)
+contra_craniosacral <- gsub('[.]',' ', colnames(craniosacralContra), perl=TRUE)
+
+```
+
+Cannabidiol (CBD) Massage Balm
+```{r}
+CBD <- subset(ngrams23All, ngrams23All$modality=='Cannabidiol (CBD) Massage Balm')
+
+CBD1 <- CBD[,-c(1:3)]
+CBD2 <- subset(CBD1, colSums(CBD1)!=0)
+
+CBD2 <- CBD1[,colSums(CBD1) >= 1]
+
+contracbd <- grep('[.].*[.].*',colnames(CBD2))
+cbdContra <- CBD2[,contracbd]
+cbdBenefit <- CBD2[,-contracbd]
+
+benefits_cbd <- gsub('[.]',' ', colnames(cbdBenefit), perl=TRUE)
+contra_cbd <- gsub('[.]',' ', colnames(cbdContra), perl=TRUE)
+
+```
+
+Benefits of each modality as lists:
+benefits_cbd,benefits_craniosacral,benefits_reflexology,benefits_lymphatic,benefits_massagegun,benefits_tpt,benefits_instrument,benefits_DT,benefits_swedish,benefits_aroma,benefits_stretch,benefits_cold,benefits_freeze,benefits_sports,benefits_cup,benefits_hs,benefits_shiatsu,benefits_prenatal,benefits_myofascial
+
+Contraindications of each modality as lists:
+contra_cbd,contra_craniosacral,contra_reflexology,contra_lymphatic,contra_massagegun,contra_tpt,contra_instrument,contra_DT,contra_swedish,contra_aroma,contra_stretch,contra_cold,contra_freeze,
+contra_sports,contra_cup,contra_hs,contra_shiatsu,contra_prenatal,contra_myofascial
+
+```{r}
+benefits_cbd
+contra_cbd
+```
+
+The above demonstrates the benefits of CBD as a list of double word pairs or bigrams with the stop words stripped, and the bottom list is the longer list of trigrams of three word groups for the contraindications for CBD with the stopwords stripped. What we now want is a way to get the user the have a user input that will scan the list of contraindications for each massage modality, and if it is in the list of a modality, then it will be excluded from the list of available massage modalities for the user. 
+
+Looking at the above list the contraindications are grouped together that are different health conditions like psychosis (and) numbness (in the) limb. Users don't want to scan a list of 500 health conditions or even more than 10, but any health conditions they have will have to be reported before scheduling a massage so that it isn't cancelled or booked for the wrong modality. Lets assume the user honestly includes every possible health condition and history of their health conditions for serious medical conditions, then we want this program to scan those groups of words and find the modalities the user absolutely should not have, so that a list of available massage modalities are provided for the user to select the best one for benefits.Some users might not spell the same words or use the same words to describe the same sort of health condition. Like psychosis, I caught my own spelling error as pyschosis and fixed it. Also, the mental disorder or psychosis wouldn't be a health condition one's self would put down, only someone scheduling the massage for the person, like a child of a dementia patient, or parent, for similar mental disorders. There are quite a bit of those, and no massage therapist wants to put their professional or livelihood on the line to massage someone with mental disorders if the client will have a break down in session of some sort, like a relapse or yelling, or similar actions people aren't capable of dealing with on a professional level. Massage therapists are not mental healthcare workers, but the massage does produce benefits that improve mental functions, therefore they cannot handle a client having a break down or threatening their safety if it occurs. So it is best to have these types of health conditions resolved or alerted to, so that a bystander for the client with a mental disorder can be nearby to handle the situation should it occur, or wait until the mental health has improved for the client before scheduling a massage. Lets not compete with God here, lest he or she put us in a comatose state and be like, 'oh you know my thoughts and any of my children's thoughts, well see how you produce machine learning on thoughts now, but, etc.' So, we will not manually scan these words in the list and pick them out, but lets perhaps take that same user input off our trigrams from our model built on contrainidcations, and assume that we can select any bigram word pairs from these trigrams and then add any modality the user input pulls up into a list of modalities to exclude. Some will not be good bigrams, like 'disease pyschosis' but others like 'autoimmune disease' are good bigrams for reported health conditions. Because someone with autoimmune disease will not want a painful and debillitating flare up if a massage modality activated those symptoms, and the client came to realize that he or she did not report it beforehand. Other words like,pregnant, fever, and rash would be best as unigrams. So we should create an ngram of unigrams and bigrams from each list of contraindications. 
+
+We can use string literals and list apply methods to extract these uni and bi gram word pairs from our trigrams of contraindications.
+```{r}
+cbd_split <- strsplit(contra_cbd,split=' ')
+cbd_split1 <- lapply(cbd_split, '[',1)
+cbd_split1b <- as.character(cbd_split1)
+cbd_split1b
+cat('\n','\n')
+
+cbd_split2 <- lapply(cbd_split, '[',2)
+cbd_split2b <- as.character(cbd_split2)
+cbd_split2b
+cat('\n','\n')
+
+cbd_split3 <- lapply(cbd_split, '[',3)
+cbd_split3b <- as.character(cbd_split3)
+cbd_split3b
+cat('\n','\n')
+
+```
+
+Above is our list of unigrams for CBD contraindications. Lets get the bigrams.
+```{r}
+cbd_bi1 <- paste(cbd_split1b,cbd_split2b)
+cbd_bi1
+cat('\n\n')
+
+cbd_bi2 <- paste(cbd_split2b,cbd_split3b)
+cbd_bi2
+cat('\n\n')
+
+cbd_bi3 <- paste(cbd_split3b,cbd_split1b)
+cbd_bi3
+cat('\n\n')
+
+
+```
+
+The following is a list of all the unique unigrams in the CBD contraindication trigrams.
+```{r}
+uni_cbd <- unique(c(cbd_split1b, cbd_split2b, cbd_split3b))
+uni_cbd
+```
+
+The following is a list of all the unique bigrams of the CBD contraindications trigrams.
+```{r}
+bi_cbd <- unique(c(cbd_bi1, cbd_bi2, cbd_bi3))
+bi_cbd
+```
+
+The trigrams are already uniquely identified, because they were column names, and only unique column names can be used but also they were the trigrams that had count values out of all contraindications within the massage modalities' contraindications, for this modality.
+
+So, we will combine this as the list of 1-3 ngrams for our CBD contraindications.
+```{r}
+CBD_contraindications <- c(contra_cbd, bi_cbd, uni_cbd)
+CBD_contraindications
+```
+
+Looking at the list above, it is clear that if any of these unigrams are in a user input, then the modality will get excluded. We won't want this to occur, because somebody using dialogue consisting of 'pain' or 'could' would not get any recommendations for massage. And, also, you might be wondering why not do this earlier when pulling the ngrams and setting to (1,3), but recall this is a list of trigrams for contraindications and a list of bigrams for benefits that were put together in the table, and when using regex to pull the bigrams from the trigrams, we were able to separate the bigrams with one '[.]' and the trigrams with two '[.]'.
+
+We can do the similar with the benefits of CBD list of bigrams to create the unigrams to combine with the bigrams for CBD benefits, then pull out the unigrams in common between the two and favor those single words or unigrams as benefits. Same for the bigrams in common, we will pull those out to assign them to benefits. A possible problem is that the bigram could be a contraindication and the same for the unigrams. We will examine that after building those lists.
+
+Lets get the unigrams of benefits of CBD.
+```{r}
+benefit_uni <- strsplit(benefits_cbd, split=" ")
+benefit_uni1 <- lapply(benefit_uni,'[',1)
+benefit_uni1b <- as.character(benefit_uni1)
+benefit_uni2 <- lapply(benefit_uni,'[',2)
+benefit_uni2b <- as.character(benefit_uni2)
+
+uni_benefits <- unique(c(benefit_uni1b,benefit_uni2b))
+
+benefits_cbd1 <- c(uni_benefits, benefits_cbd)
+benefits_cbd1
+```
+
+Lets now get the list of tokens in both benefits and contraindications.
+
+```{r}
+both_cbd <- CBD_contraindications %in% benefits_cbd1
+length(both_cbd)
+both_cbd
+```
+
+```{r}
+cbd1 <- CBD_contraindications[both_cbd]
+length(cbd1)
+cbd1
+```
+
+The above words are included in both the benefits of CBD and the contraindications of CBD. So, judging from the three words, 'nerve pain', 'nerve', and 'pain,' we will exclude these as markers for contraindications for CBD oil during massage, as they are more likely benefits.
+
+```{r}
+CBD_contraindications1 <- CBD_contraindications[both_cbd==FALSE]
+length(CBD_contraindications1)
+CBD_contraindications1
+```
+
+We could create a data table of the benefits of each modality, the contraindications, and/or both tokens to pull from or keep them as lists to pull from within our program. But not only do we already have those tables, because we made our 19 modality subsets from them, but we would have to merge each one to the other or join creating Nulls. So we will keep them as lists that have been filtered to be better than the orignal lists that removed as much ambiguity as possible between benefits and contraindications. So, now we will create these filtered lists for the other 18 modalities. 
+
+As an aside, who here has watched the reintroduced film on Amazon Prime from 2008, 'Rainman Twins-..Savante autistics Kay and...'? I don't remember the name, but easily Googled. I paid $2.99 to watch it yesterday thinking it was new, but only to me. Sometimes, just like neural networkds old stuff isn't good at that time, but can be re-introduced 10-30 years later for its benefits. The point is, if you did watch this, and if you know the back story of neural networks, you will find that those twins were savante autistics who could recall on the spot with no more than one second to recall the day of the week of any date, the food they ate, the clothes worn, etc. and were viewed and harassed as 'retards' until the film came out with Dustin HOffman praising and encouraging savante's to be found and appreciated. They needed to have routine, and marked all the bells, buzzards, and host clothings during every episode of the 100,000 Pyramid show, and went calmly nuts when it ended. If they were to do the following, they could be of better use. We are going to do just that, and think to ourselves how those twins could have been put to better work. So as we build our next filtered lists of the remaining 18 benefits and contraindications for each modality. We will also be thinking about how we are going to build this program.
+
+***
+
+benefits_craniosacral,contra_craniosacral
+```{r}
+cranio_split <- strsplit(contra_craniosacral,split=' ')
+cranio_split1 <- lapply(cranio_split, '[',1)
+cranio_split1b <- as.character(cranio_split1)
+cranio_split2 <- lapply(cranio_split, '[',2)
+cranio_split2b <- as.character(cranio_split2)
+cranio_split3 <- lapply(cranio_split, '[',3)
+cranio_split3b <- as.character(cranio_split3)
+cranio_bi1 <- paste(cranio_split1b,cranio_split2b)
+cranio_bi2 <- paste(cranio_split2b,cranio_split3b)
+cranio_bi3 <- paste(cranio_split3b,cranio_split1b)
+uni_cranio <- unique(c(cranio_split1b, cranio_split2b, cranio_split3b))
+bi_cranio <- unique(c(cranio_bi1, cranio_bi2, cranio_bi3))
+Cranio_contraindications <- c(contra_craniosacral, bi_cranio, uni_cranio)
+csbenefit_uni <- strsplit(benefits_craniosacral, split=" ")
+csbenefit_uni1 <- lapply(csbenefit_uni,'[',1)
+csbenefit_uni1b <- as.character(csbenefit_uni1)
+csbenefit_uni2 <- lapply(csbenefit_uni,'[',2)
+csbenefit_uni2b <- as.character(csbenefit_uni2)
+csuni_benefits <- unique(c(csbenefit_uni1b,csbenefit_uni2b))
+benefits_cranio1 <- c(csuni_benefits, benefits_craniosacral) #
+
+both_cranio <- Cranio_contraindications %in% benefits_cranio1
+cranio1 <- Cranio_contraindications[both_cranio] #
+Cranio_contraindications1 <- Cranio_contraindications[both_cranio==FALSE] #
+
+```
+
+benefits_reflexology,contra_reflexology
+```{r}
+reflex_split <- strsplit(contra_reflexology,split=' ')
+reflex_split1 <- lapply(reflex_split, '[',1)
+reflex_split1b <- as.character(reflex_split1)
+reflex_split2 <- lapply(reflex_split, '[',2)
+reflex_split2b <- as.character(reflex_split2)
+reflex_split3 <- lapply(reflex_split, '[',3)
+reflex_split3b <- as.character(reflex_split3)
+reflex_bi1 <- paste(reflex_split1b,reflex_split2b)
+reflex_bi2 <- paste(reflex_split2b,reflex_split3b)
+reflex_bi3 <- paste(reflex_split3b,reflex_split1b)
+uni_reflex <- unique(c(reflex_split1b, reflex_split2b, reflex_split3b))
+bi_reflex <- unique(c(reflex_bi1, reflex_bi2, reflex_bi3))
+Reflex_contraindications <- c(contra_reflexology, bi_reflex, uni_reflex)
+rfxbenefit_uni <- strsplit(benefits_reflexology, split=" ")
+rfxbenefit_uni1 <- lapply(rfxbenefit_uni,'[',1)
+rfxbenefit_uni1b <- as.character(rfxbenefit_uni1)
+rfxbenefit_uni2 <- lapply(rfxbenefit_uni,'[',2)
+rfxbenefit_uni2b <- as.character(rfxbenefit_uni2)
+rfxuni_benefits <- unique(c(rfxbenefit_uni1b,rfxbenefit_uni2b))
+benefits_reflex1 <- c(rfxuni_benefits, benefits_reflexology) #
+
+both_reflex <- Reflex_contraindications %in% benefits_reflex1
+reflex1 <- Reflex_contraindications[both_reflex] #
+Reflex_contraindications1 <- Reflex_contraindications[both_reflex==FALSE] #
+
+
+```
+
+benefits_lymphatic, contra_lymphatic
+```{r}
+lymph_split <- strsplit(contra_lymphatic,split=' ')
+lymph_split1 <- lapply(lymph_split, '[',1)
+lymph_split1b <- as.character(lymph_split1)
+lymph_split2 <- lapply(lymph_split, '[',2)
+lymph_split2b <- as.character(lymph_split2)
+lymph_split3 <- lapply(lymph_split, '[',3)
+lymph_split3b <- as.character(lymph_split3)
+lymph_bi1 <- paste(lymph_split1b,lymph_split2b)
+lymph_bi2 <- paste(lymph_split2b,lymph_split3b)
+lymph_bi3 <- paste(lymph_split3b,lymph_split1b)
+uni_lymph <- unique(c(lymph_split1b, lymph_split2b, lymph_split3b))
+bi_lymph <- unique(c(lymph_bi1, lymph_bi2, lymph_bi3))
+Lymph_contraindications <- c(contra_lymphatic, bi_lymph, uni_lymph)
+lymphbenefit_uni <- strsplit(benefits_lymphatic, split=" ")
+lymphbenefit_uni1 <- lapply(lymphbenefit_uni,'[',1)
+lymphbenefit_uni1b <- as.character(lymphbenefit_uni1)
+lymphbenefit_uni2 <- lapply(lymphbenefit_uni,'[',2)
+lymphbenefit_uni2b <- as.character(lymphbenefit_uni2)
+lymphuni_benefits <- unique(c(lymphbenefit_uni1b,lymphbenefit_uni2b))
+benefits_lymph1 <- c(lymphuni_benefits, benefits_lymphatic) #
+
+both_lymph <- Lymph_contraindications %in% benefits_lymph1
+lymph1 <- Lymph_contraindications[both_lymph] #
+Lymph_contraindications1 <- Lymph_contraindications[both_lymph==FALSE] #
+
+```
+
+benefits_massagegun, contra_massagegun
+```{r}
+mgn_split <- strsplit(contra_massagegun,split=' ')
+mgn_split1 <- lapply(mgn_split, '[',1)
+mgn_split1b <- as.character(mgn_split1)
+mgn_split2 <- lapply(mgn_split, '[',2)
+mgn_split2b <- as.character(mgn_split2)
+mgn_split3 <- lapply(mgn_split, '[',3)
+mgn_split3b <- as.character(mgn_split3)
+mgn_bi1 <- paste(mgn_split1b,mgn_split2b)
+mgn_bi2 <- paste(mgn_split2b,mgn_split3b)
+mgn_bi3 <- paste(mgn_split3b,mgn_split1b)
+uni_mgn <- unique(c(mgn_split1b, mgn_split2b, mgn_split3b))
+bi_mgn <- unique(c(mgn_bi1, mgn_bi2, mgn_bi3))
+Mgn_contraindications <- c(contra_massagegun, bi_mgn, uni_mgn)
+mgnbenefit_uni <- strsplit(benefits_massagegun, split=" ")
+mgnbenefit_uni1 <- lapply(mgnbenefit_uni,'[',1)
+mgnbenefit_uni1b <- as.character(mgnbenefit_uni1)
+mgnbenefit_uni2 <- lapply(mgnbenefit_uni,'[',2)
+mgnbenefit_uni2b <- as.character(mgnbenefit_uni2)
+mgnuni_benefits <- unique(c(mgnbenefit_uni1b,mgnbenefit_uni2b))
+benefits_mgn1 <- c(mgnuni_benefits, benefits_massagegun) #
+
+both_mgn <- Mgn_contraindications %in% benefits_mgn1
+mgn1 <- Mgn_contraindications[both_mgn] #
+Mgn_contraindications1 <- Mgn_contraindications[both_mgn==FALSE] #
+
+
+```
+
+benefits_tpt, contra_tpt
+```{r}
+tpt_split <- strsplit(contra_tpt,split=' ')
+tpt_split1 <- lapply(tpt_split, '[',1)
+tpt_split1b <- as.character(tpt_split1)
+tpt_split2 <- lapply(tpt_split, '[',2)
+tpt_split2b <- as.character(tpt_split2)
+tpt_split3 <- lapply(tpt_split, '[',3)
+tpt_split3b <- as.character(tpt_split3)
+tpt_bi1 <- paste(tpt_split1b,tpt_split2b)
+tpt_bi2 <- paste(tpt_split2b,tpt_split3b)
+tpt_bi3 <- paste(tpt_split3b,tpt_split1b)
+uni_tpt <- unique(c(tpt_split1b, tpt_split2b, tpt_split3b))
+bi_tpt <- unique(c(tpt_bi1, tpt_bi2, tpt_bi3))
+TPT_contraindications <- c(contra_tpt, bi_tpt, uni_tpt)
+tptbenefit_uni <- strsplit(benefits_tpt, split=" ")
+tptbenefit_uni1 <- lapply(tptbenefit_uni,'[',1)
+tptbenefit_uni1b <- as.character(tptbenefit_uni1)
+tptbenefit_uni2 <- lapply(tptbenefit_uni,'[',2)
+tptbenefit_uni2b <- as.character(tptbenefit_uni2)
+tptuni_benefits <- unique(c(tptbenefit_uni1b,tptbenefit_uni2b))
+benefits_tpt1 <- c(tptuni_benefits, benefits_tpt) #
+
+both_tpt <- TPT_contraindications %in% benefits_tpt1
+tpt1 <- TPT_contraindications[both_tpt] #
+TPT_contraindications1 <- TPT_contraindications[both_tpt==FALSE] #
+
+
+```
+
+benefits_instrument, contra_instrument
+```{r}
+instrument_split <- strsplit(contra_instrument,split=' ')
+instrument_split1 <- lapply(instrument_split, '[',1)
+instrument_split1b <- as.character(instrument_split1)
+instrument_split2 <- lapply(instrument_split, '[',2)
+instrument_split2b <- as.character(instrument_split2)
+instrument_split3 <- lapply(instrument_split, '[',3)
+instrument_split3b <- as.character(instrument_split3)
+instrument_bi1 <- paste(instrument_split1b,instrument_split2b)
+instrument_bi2 <- paste(instrument_split2b,instrument_split3b)
+instrument_bi3 <- paste(instrument_split3b,instrument_split1b)
+uni_instrument <- unique(c(instrument_split1b, instrument_split2b, instrument_split3b))
+bi_instrument <- unique(c(instrument_bi1, instrument_bi2, instrument_bi3))
+Instrument_contraindications <- c(contra_instrument, bi_instrument, uni_instrument)
+instrumentbenefit_uni <- strsplit(benefits_instrument, split=" ")
+instrumentbenefit_uni1 <- lapply(instrumentbenefit_uni,'[',1)
+instrumentbenefit_uni1b <- as.character(instrumentbenefit_uni1)
+instrumentbenefit_uni2 <- lapply(instrumentbenefit_uni,'[',2)
+instrumentbenefit_uni2b <- as.character(instrumentbenefit_uni2)
+instrumentuni_benefits <- unique(c(instrumentbenefit_uni1b,instrumentbenefit_uni2b))
+benefits_instrument1 <- c(instrumentuni_benefits, benefits_instrument) #
+
+both_instrument <- Instrument_contraindications %in% benefits_instrument1
+instrument1 <- Instrument_contraindications[both_instrument] #
+Instrument_contraindications1 <- Instrument_contraindications[both_instrument==FALSE] #
+
+```
+
+benefits_DT, contra_DT
+```{r}
+DT_split <- strsplit(contra_DT,split=' ')
+DT_split1 <- lapply(DT_split, '[',1)
+DT_split1b <- as.character(DT_split1)
+DT_split2 <- lapply(DT_split, '[',2)
+DT_split2b <- as.character(DT_split2)
+DT_split3 <- lapply(DT_split, '[',3)
+DT_split3b <- as.character(DT_split3)
+DT_bi1 <- paste(DT_split1b,DT_split2b)
+DT_bi2 <- paste(DT_split2b,DT_split3b)
+DT_bi3 <- paste(DT_split3b,DT_split1b)
+uni_DT <- unique(c(DT_split1b, DT_split2b, DT_split3b))
+bi_DT <- unique(c(DT_bi1, DT_bi2, DT_bi3))
+DT_contraindications <- c(contra_DT, bi_DT, uni_DT)
+DTbenefit_uni <- strsplit(benefits_DT, split=" ")
+DTbenefit_uni1 <- lapply(DTbenefit_uni,'[',1)
+DTbenefit_uni1b <- as.character(DTbenefit_uni1)
+DTbenefit_uni2 <- lapply(DTbenefit_uni,'[',2)
+DTbenefit_uni2b <- as.character(DTbenefit_uni2)
+DTuni_benefits <- unique(c(DTbenefit_uni1b,DTbenefit_uni2b))
+benefits_DT1 <- c(DTuni_benefits, benefits_DT) #
+
+both_DT <- DT_contraindications %in% benefits_DT1
+DT1 <- DT_contraindications[both_DT] #
+DT_contraindications1 <- DT_contraindications[both_DT==FALSE] #
+
+
+```
+
+benefits_swedish, contra_swedish
+```{r}
+swedish_split <- strsplit(contra_swedish,split=' ')
+swedish_split1 <- lapply(swedish_split, '[',1)
+swedish_split1b <- as.character(swedish_split1)
+swedish_split2 <- lapply(swedish_split, '[',2)
+swedish_split2b <- as.character(swedish_split2)
+swedish_split3 <- lapply(swedish_split, '[',3)
+swedish_split3b <- as.character(swedish_split3)
+swedish_bi1 <- paste(swedish_split1b,swedish_split2b)
+swedish_bi2 <- paste(swedish_split2b,swedish_split3b)
+swedish_bi3 <- paste(swedish_split3b,swedish_split1b)
+uni_swedish <- unique(c(swedish_split1b, swedish_split2b, swedish_split3b))
+bi_swedish <- unique(c(swedish_bi1, swedish_bi2, swedish_bi3))
+swedish_contraindications <- c(contra_swedish, bi_swedish, uni_swedish)
+swedishbenefit_uni <- strsplit(benefits_swedish, split=" ")
+swedishbenefit_uni1 <- lapply(swedishbenefit_uni,'[',1)
+swedishbenefit_uni1b <- as.character(swedishbenefit_uni1)
+swedishbenefit_uni2 <- lapply(swedishbenefit_uni,'[',2)
+swedishbenefit_uni2b <- as.character(swedishbenefit_uni2)
+swedishuni_benefits <- unique(c(swedishbenefit_uni1b,swedishbenefit_uni2b))
+benefits_swedish1 <- c(swedishuni_benefits, benefits_swedish) #
+
+both_swedish <- swedish_contraindications %in% benefits_swedish1
+swedish1 <- swedish_contraindications[both_swedish] #
+swedish_contraindications1 <- swedish_contraindications[both_swedish==FALSE] #
+
+
+```
+
+benefits_aroma, contra_aroma
+```{r}
+aroma_split <- strsplit(contra_aroma,split=' ')
+aroma_split1 <- lapply(aroma_split, '[',1)
+aroma_split1b <- as.character(aroma_split1)
+aroma_split2 <- lapply(aroma_split, '[',2)
+aroma_split2b <- as.character(aroma_split2)
+aroma_split3 <- lapply(aroma_split, '[',3)
+aroma_split3b <- as.character(aroma_split3)
+aroma_bi1 <- paste(aroma_split1b,aroma_split2b)
+aroma_bi2 <- paste(aroma_split2b,aroma_split3b)
+aroma_bi3 <- paste(aroma_split3b,aroma_split1b)
+uni_aroma <- unique(c(aroma_split1b, aroma_split2b, aroma_split3b))
+bi_aroma <- unique(c(aroma_bi1, aroma_bi2, aroma_bi3))
+Aroma_contraindications <- c(contra_aroma, bi_aroma, uni_aroma)
+aromabenefit_uni <- strsplit(benefits_aroma, split=" ")
+aromabenefit_uni1 <- lapply(aromabenefit_uni,'[',1)
+aromabenefit_uni1b <- as.character(aromabenefit_uni1)
+aromabenefit_uni2 <- lapply(aromabenefit_uni,'[',2)
+aromabenefit_uni2b <- as.character(aromabenefit_uni2)
+aromauni_benefits <- unique(c(aromabenefit_uni1b,aromabenefit_uni2b))
+benefits_aroma1 <- c(aromauni_benefits, benefits_aroma) #
+
+both_aroma <- Aroma_contraindications %in% benefits_aroma1
+aroma1 <- Aroma_contraindications[both_aroma] #
+Aroma_contraindications1 <- Aroma_contraindications[both_aroma==FALSE] #
+
+
+```
+
+benefits_stretch, contra_stretch
+```{r}
+stretch_split <- strsplit(contra_stretch,split=' ')
+stretch_split1 <- lapply(stretch_split, '[',1)
+stretch_split1b <- as.character(stretch_split1)
+stretch_split2 <- lapply(stretch_split, '[',2)
+stretch_split2b <- as.character(stretch_split2)
+stretch_split3 <- lapply(stretch_split, '[',3)
+stretch_split3b <- as.character(stretch_split3)
+stretch_bi1 <- paste(stretch_split1b,stretch_split2b)
+stretch_bi2 <- paste(stretch_split2b,stretch_split3b)
+stretch_bi3 <- paste(stretch_split3b,stretch_split1b)
+uni_stretch <- unique(c(stretch_split1b, stretch_split2b, stretch_split3b))
+bi_stretch <- unique(c(stretch_bi1, stretch_bi2, stretch_bi3))
+stretch_contraindications <- c(contra_stretch, bi_stretch, uni_stretch)
+stretchbenefit_uni <- strsplit(benefits_stretch, split=" ")
+stretchbenefit_uni1 <- lapply(stretchbenefit_uni,'[',1)
+stretchbenefit_uni1b <- as.character(stretchbenefit_uni1)
+stretchbenefit_uni2 <- lapply(stretchbenefit_uni,'[',2)
+stretchbenefit_uni2b <- as.character(stretchbenefit_uni2)
+stretchuni_benefits <- unique(c(stretchbenefit_uni1b,stretchbenefit_uni2b))
+benefits_stretch1 <- c(stretchuni_benefits, benefits_stretch) #
+
+both_stretch <- stretch_contraindications %in% benefits_stretch1
+stretch1 <- stretch_contraindications[both_stretch] #
+stretch_contraindications1 <- stretch_contraindications[both_stretch==FALSE] #
+
+```
+
+benefits_cold, contra_cold
+```{r}
+cold_split <- strsplit(contra_cold,split=' ')
+cold_split1 <- lapply(cold_split, '[',1)
+cold_split1b <- as.character(cold_split1)
+cold_split2 <- lapply(cold_split, '[',2)
+cold_split2b <- as.character(cold_split2)
+cold_split3 <- lapply(cold_split, '[',3)
+cold_split3b <- as.character(cold_split3)
+cold_bi1 <- paste(cold_split1b,cold_split2b)
+cold_bi2 <- paste(cold_split2b,cold_split3b)
+cold_bi3 <- paste(cold_split3b,cold_split1b)
+uni_cold <- unique(c(cold_split1b, cold_split2b, cold_split3b))
+bi_cold <- unique(c(cold_bi1, cold_bi2, cold_bi3))
+cold_contraindications <- c(contra_cold, bi_cold, uni_cold)
+coldbenefit_uni <- strsplit(benefits_cold, split=" ")
+coldbenefit_uni1 <- lapply(coldbenefit_uni,'[',1)
+coldbenefit_uni1b <- as.character(coldbenefit_uni1)
+coldbenefit_uni2 <- lapply(coldbenefit_uni,'[',2)
+coldbenefit_uni2b <- as.character(coldbenefit_uni2)
+colduni_benefits <- unique(c(coldbenefit_uni1b,coldbenefit_uni2b))
+benefits_cold1 <- c(colduni_benefits, benefits_cold) #
+
+both_cold <- cold_contraindications %in% benefits_cold1
+cold1 <- cold_contraindications[both_cold] #
+cold_contraindications1 <- cold_contraindications[both_cold==FALSE] #
+
+
+```
+
+benefits_freeze, contra_freeze
+```{r}
+freeze_split <- strsplit(contra_freeze,split=' ')
+freeze_split1 <- lapply(freeze_split, '[',1)
+freeze_split1b <- as.character(freeze_split1)
+freeze_split2 <- lapply(freeze_split, '[',2)
+freeze_split2b <- as.character(freeze_split2)
+freeze_split3 <- lapply(freeze_split, '[',3)
+freeze_split3b <- as.character(freeze_split3)
+freeze_bi1 <- paste(freeze_split1b,freeze_split2b)
+freeze_bi2 <- paste(freeze_split2b,freeze_split3b)
+freeze_bi3 <- paste(freeze_split3b,freeze_split1b)
+uni_freeze <- unique(c(freeze_split1b, freeze_split2b, freeze_split3b))
+bi_freeze <- unique(c(freeze_bi1, freeze_bi2, freeze_bi3))
+Freeze_contraindications <- c(contra_freeze, bi_freeze, uni_freeze)
+freezebenefit_uni <- strsplit(benefits_freeze, split=" ")
+freezebenefit_uni1 <- lapply(freezebenefit_uni,'[',1)
+freezebenefit_uni1b <- as.character(freezebenefit_uni1)
+freezebenefit_uni2 <- lapply(freezebenefit_uni,'[',2)
+freezebenefit_uni2b <- as.character(freezebenefit_uni2)
+freezeuni_benefits <- unique(c(freezebenefit_uni1b,freezebenefit_uni2b))
+benefits_freeze1 <- c(freezeuni_benefits, benefits_freeze) #
+
+both_freeze <- Freeze_contraindications %in% benefits_freeze1
+freeze1 <- Freeze_contraindications[both_freeze] #
+Freeze_contraindications1 <- Freeze_contraindications[both_freeze==FALSE] #
+
+```
+
+benefits_sports, contra_sports
+```{r}
+sports_split <- strsplit(contra_sports,split=' ')
+sports_split1 <- lapply(sports_split, '[',1)
+sports_split1b <- as.character(sports_split1)
+sports_split2 <- lapply(sports_split, '[',2)
+sports_split2b <- as.character(sports_split2)
+sports_split3 <- lapply(sports_split, '[',3)
+sports_split3b <- as.character(sports_split3)
+sports_bi1 <- paste(sports_split1b,sports_split2b)
+sports_bi2 <- paste(sports_split2b,sports_split3b)
+sports_bi3 <- paste(sports_split3b,sports_split1b)
+uni_sports <- unique(c(sports_split1b, sports_split2b, sports_split3b))
+bi_sports <- unique(c(sports_bi1, sports_bi2, sports_bi3))
+Sports_contraindications <- c(contra_sports, bi_sports, uni_sports)
+sportsbenefit_uni <- strsplit(benefits_sports, split=" ")
+sportsbenefit_uni1 <- lapply(sportsbenefit_uni,'[',1)
+sportsbenefit_uni1b <- as.character(sportsbenefit_uni1)
+sportsbenefit_uni2 <- lapply(sportsbenefit_uni,'[',2)
+sportsbenefit_uni2b <- as.character(sportsbenefit_uni2)
+sportsuni_benefits <- unique(c(sportsbenefit_uni1b,sportsbenefit_uni2b))
+benefits_sports1 <- c(sportsuni_benefits, benefits_sports) #
+
+both_sports <- Sports_contraindications %in% benefits_sports1
+sports1 <- Sports_contraindications[both_sports] #
+Sports_contraindications1 <- Sports_contraindications[both_sports==FALSE] #
+
+```
+
+benefits_cup, contra_cup
+```{r}
+cup_split <- strsplit(contra_cup,split=' ')
+cup_split1 <- lapply(cup_split, '[',1)
+cup_split1b <- as.character(cup_split1)
+cup_split2 <- lapply(cup_split, '[',2)
+cup_split2b <- as.character(cup_split2)
+cup_split3 <- lapply(cup_split, '[',3)
+cup_split3b <- as.character(cup_split3)
+cup_bi1 <- paste(cup_split1b,cup_split2b)
+cup_bi2 <- paste(cup_split2b,cup_split3b)
+cup_bi3 <- paste(cup_split3b,cup_split1b)
+uni_cup <- unique(c(cup_split1b, cup_split2b, cup_split3b))
+bi_cup <- unique(c(cup_bi1, cup_bi2, cup_bi3))
+Cupping_contraindications <- c(contra_cup, bi_cup, uni_cup)
+cuppingbenefit_uni <- strsplit(benefits_cup, split=" ")
+cuppingbenefit_uni1 <- lapply(cuppingbenefit_uni,'[',1)
+cuppingbenefit_uni1b <- as.character(cuppingbenefit_uni1)
+cuppingbenefit_uni2 <- lapply(cuppingbenefit_uni,'[',2)
+cuppingbenefit_uni2b <- as.character(cuppingbenefit_uni2)
+cuppinguni_benefits <- unique(c(cuppingbenefit_uni1b,cuppingbenefit_uni2b))
+benefits_cup1 <- c(cuppinguni_benefits, benefits_cup) #
+
+both_cup <- Cupping_contraindications %in% benefits_cup1
+cup1 <- Cupping_contraindications[both_cup] #
+Cupping_contraindications1 <- Cupping_contraindications[both_cup==FALSE] #
+
+
+```
+
+benefits_hs, contra_hs
+```{r}
+HotStone_split <- strsplit(contra_hs,split=' ')
+HotStone_split1 <- lapply(HotStone_split, '[',1)
+HotStone_split1b <- as.character(HotStone_split1)
+HotStone_split2 <- lapply(HotStone_split, '[',2)
+HotStone_split2b <- as.character(HotStone_split2)
+HotStone_split3 <- lapply(HotStone_split, '[',3)
+HotStone_split3b <- as.character(HotStone_split3)
+HotStone_bi1 <- paste(HotStone_split1b,HotStone_split2b)
+HotStone_bi2 <- paste(HotStone_split2b,HotStone_split3b)
+HotStone_bi3 <- paste(HotStone_split3b,HotStone_split1b)
+uni_HotStone <- unique(c(HotStone_split1b, HotStone_split2b, HotStone_split3b))
+bi_HotStone <- unique(c(HotStone_bi1, HotStone_bi2, HotStone_bi3))
+HotStone_contraindications <- c(contra_hs, bi_HotStone, uni_HotStone)
+hsbenefit_uni <- strsplit(benefits_hs, split=" ")
+hsbenefit_uni1 <- lapply(hsbenefit_uni,'[',1)
+hsbenefit_uni1b <- as.character(hsbenefit_uni1)
+hsbenefit_uni2 <- lapply(hsbenefit_uni,'[',2)
+hsbenefit_uni2b <- as.character(hsbenefit_uni2)
+hsuni_benefits <- unique(c(hsbenefit_uni1b,hsbenefit_uni2b))
+benefits_HotStone1 <- c(hsuni_benefits, benefits_hs) #
+
+both_HotStone <- HotStone_contraindications %in% benefits_HotStone1
+HotStone1 <- HotStone_contraindications[both_HotStone] #
+HotStone_contraindications1 <- HotStone_contraindications[both_HotStone==FALSE] #
+
+```
+
+benefits_shiatsu, contra_shiatsu
+```{r}
+shiatsu_split <- strsplit(contra_shiatsu,split=' ')
+shiatsu_split1 <- lapply(shiatsu_split, '[',1)
+shiatsu_split1b <- as.character(shiatsu_split1)
+shiatsu_split2 <- lapply(shiatsu_split, '[',2)
+shiatsu_split2b <- as.character(shiatsu_split2)
+shiatsu_split3 <- lapply(shiatsu_split, '[',3)
+shiatsu_split3b <- as.character(shiatsu_split3)
+shiatsu_bi1 <- paste(shiatsu_split1b,shiatsu_split2b)
+shiatsu_bi2 <- paste(shiatsu_split2b,shiatsu_split3b)
+shiatsu_bi3 <- paste(shiatsu_split3b,shiatsu_split1b)
+uni_shiatsu <- unique(c(shiatsu_split1b, shiatsu_split2b, shiatsu_split3b))
+bi_shiatsu <- unique(c(shiatsu_bi1, shiatsu_bi2, shiatsu_bi3))
+Shiatsu_contraindications <- c(contra_shiatsu, bi_shiatsu, uni_shiatsu)
+shiatsubenefit_uni <- strsplit(benefits_shiatsu, split=" ")
+shiatsubenefit_uni1 <- lapply(shiatsubenefit_uni,'[',1)
+shiatsubenefit_uni1b <- as.character(shiatsubenefit_uni1)
+shiatsubenefit_uni2 <- lapply(shiatsubenefit_uni,'[',2)
+shiatsubenefit_uni2b <- as.character(shiatsubenefit_uni2)
+shiatsuuni_benefits <- unique(c(shiatsubenefit_uni1b,shiatsubenefit_uni2b))
+benefits_shiatsu1 <- c(shiatsuuni_benefits, benefits_shiatsu) #
+
+both_shiatsu <- Shiatsu_contraindications %in% benefits_shiatsu1
+shiatsu1 <- Shiatsu_contraindications[both_shiatsu] #
+Shiatsu_contraindications1 <- Shiatsu_contraindications[both_shiatsu==FALSE] #
+
+```
+
+benefits_prenatal, contra_prenatal
+```{r}
+prenatal_split <- strsplit(contra_prenatal,split=' ')
+prenatal_split1 <- lapply(prenatal_split, '[',1)
+prenatal_split1b <- as.character(prenatal_split1)
+prenatal_split2 <- lapply(prenatal_split, '[',2)
+prenatal_split2b <- as.character(prenatal_split2)
+prenatal_split3 <- lapply(prenatal_split, '[',3)
+prenatal_split3b <- as.character(prenatal_split3)
+prenatal_bi1 <- paste(prenatal_split1b,prenatal_split2b)
+prenatal_bi2 <- paste(prenatal_split2b,prenatal_split3b)
+prenatal_bi3 <- paste(prenatal_split3b,prenatal_split1b)
+uni_prenatal <- unique(c(prenatal_split1b, prenatal_split2b, prenatal_split3b))
+bi_prenatal <- unique(c(prenatal_bi1, prenatal_bi2, prenatal_bi3))
+Prenatal_contraindications <- c(contra_prenatal, bi_prenatal, uni_prenatal)
+prenatalbenefit_uni <- strsplit(benefits_prenatal, split=" ")
+prenatalbenefit_uni1 <- lapply(prenatalbenefit_uni,'[',1)
+prenatalbenefit_uni1b <- as.character(prenatalbenefit_uni1)
+prenatalbenefit_uni2 <- lapply(prenatalbenefit_uni,'[',2)
+prenatalbenefit_uni2b <- as.character(prenatalbenefit_uni2)
+prenataluni_benefits <- unique(c(prenatalbenefit_uni1b,prenatalbenefit_uni2b))
+benefits_prenatal1 <- c(prenataluni_benefits, benefits_prenatal) #
+
+both_prenatal <- Prenatal_contraindications %in% benefits_prenatal1
+prenatal1 <- Prenatal_contraindications[both_prenatal] #
+Prenatal_contraindications1 <- Prenatal_contraindications[both_prenatal==FALSE] #
+
+
+```
+
+benefits_myofascial, contra_myofascial
+```{r}
+myofascial_split <- strsplit(contra_myofascial,split=' ')
+myofascial_split1 <- lapply(myofascial_split, '[',1)
+myofascial_split1b <- as.character(myofascial_split1)
+myofascial_split2 <- lapply(myofascial_split, '[',2)
+myofascial_split2b <- as.character(myofascial_split2)
+myofascial_split3 <- lapply(myofascial_split, '[',3)
+myofascial_split3b <- as.character(myofascial_split3)
+myofascial_bi1 <- paste(myofascial_split1b,myofascial_split2b)
+myofascial_bi2 <- paste(myofascial_split2b,myofascial_split3b)
+myofascial_bi3 <- paste(myofascial_split3b,myofascial_split1b)
+uni_myofascial <- unique(c(myofascial_split1b, myofascial_split2b, myofascial_split3b))
+bi_myofascial <- unique(c(myofascial_bi1, myofascial_bi2, myofascial_bi3))
+Myofascial_contraindications <- c(contra_myofascial, bi_myofascial, uni_myofascial)
+myofascialbenefit_uni <- strsplit(benefits_myofascial, split=" ")
+myofascialbenefit_uni1 <- lapply(myofascialbenefit_uni,'[',1)
+myofascialbenefit_uni1b <- as.character(myofascialbenefit_uni1)
+myofascialbenefit_uni2 <- lapply(myofascialbenefit_uni,'[',2)
+myofascialbenefit_uni2b <- as.character(myofascialbenefit_uni2)
+myofascialuni_benefits <- unique(c(myofascialbenefit_uni1b,myofascialbenefit_uni2b))
+benefits_myofascial1 <- c(myofascialuni_benefits, benefits_myofascial) #
+
+both_myofascial <- Myofascial_contraindications %in% benefits_myofascial1
+myofascial1 <- Myofascial_contraindications[both_myofascial] #
+Myofascial_contraindications1 <- Myofascial_contraindications[both_myofascial==FALSE] #
+
+
+```
+
+
+***
+
+Now that we have our lists of better contraindications and better benefits for each massage modality, and the tokens commen to both, we should start building our recommender system for massage that first excludes any modality that has the tokens for contraindications based on a user input, then use the user input to recommend a massage or many massages based on the tokens that fit into the benefits of each modality.
+
+We should first start by tokenizing a list the same way we did with the model that produced these tokens. We did this in python, and we could go back to python, or we could tokenize in R with the same packages used in an earlier text mining script called SentimentAnalysisReviewsMixedBusinessModels2.Rmd (reviewsYelp2 desktop folder) from the tm, tidytext, textstem, stringr, dplyr, and tidyverse R packages.
+
+We will lemmatize the tokens of the benefits and contraindications each separately and also the Description and sideEffects to possibly use later.
+```{r}
+modes <- read.csv('MassageModalities2.csv', sep=',', header=TRUE, na.strings=c('',' ','NA'))
+colnames(modes)[1] <- 'modality'
+
+modes$lemmaDescription <- lemmatize_strings(modes$Description, dictionary=lexicon::hash_lemmas)
+modes$lemmaBenefits <- lemmatize_strings(modes$benefits, dictionary=lexicon::hash_lemmas)
+modes$lemmaContraindications <- lemmatize_strings(modes$contraindications,
+                                                  dictionary=lexicon::hash_lemmas)
+modes$lemmaSideEffects <- lemmatize_strings(modes$sideEffects, dictionary=lexicon::hash_lemmas)
+
+```
+
+Then we will take the bigrams of the lemmatized benefits, and trigrams of the lemmatized contraindications.
+```{r}
+lemmaTable <- tibble(line=1:456, Modality=modes$modality,
+                  Description=modes$lemmaDescription,
+                  SideEffects=modes$lemmaSideEffects,
+                  Benefits=modes$lemmaBenefits,
+                  Contraindications=modes$lemmaContraindications
+                  )
+
+bigram_df <- lemmaTable %>% unnest_tokens(BenefitsBigram, Benefits, token='ngrams',n=2) 
+bigram_df2 <- bigram_df %>% count(BenefitsBigram, sort=TRUE)
+
+bigram_separate <- bigram_df2 %>%
+  separate(BenefitsBigram, c('word1','word2'), sep=' ') 
+
+bigram_noStops <- bigram_separate %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) 
+
+bigram_counts <- bigram_noStops %>% count(word1,word2,sort=TRUE)
+
+
+
+trigram_df <- lemmaTable %>% unnest_tokens(ContraindicationsTrigram,Contraindications,
+                                           token='ngrams',n=3)
+trigram_df2 <- trigram_df %>% count(ContraindicationsTrigram, sort=TRUE)
+
+trigram_separate <- trigram_df2 %>% separate(ContraindicationsTrigram,
+                                             c('word1','word2','word3'), sep=' ')
+
+trigram_noStops <- trigram_separate %>% filter(!word1 %in% stop_words$word)%>%
+  filter(!word2 %in% stop_words$word) %>% filter(!word3 %in% stop_words$word)
+
+trigram_noStops_counts <- trigram_noStops %>% count(word1,word2,word3, sort=TRUE)
+
+```
+
+
+```{r}
+colnames(bigram_counts)
+bigram_counts
+```
+
+```{r}
+colnames(trigram_noStops_counts)
+trigram_noStops_counts
+```
+
+```{r}
+quadgram_description <- lemmaTable %>% unnest_tokens(DescriptionQuadgram,Description,
+                                           token='ngrams',n=4)
+quadgram_description
+
+```
+
+***
+
+# The Massage Recommender Program 
+
+This program is Built in R from lemmatized and tokened lists done in python 3.
+
+The tidytext has the great tokenization feature, but doesn't allow groups of more than one ngram, such as setting ngrams to a list like n=c(1,4), as the python 3 nltk package does. But it can be worked around if needed to get those values separately or as we did with string literals earlier when filtering the tokenized words for better tokens of benefits and contraindications for massage.
+
+We aren't much concerned with counts, as this goal was to get the contraindications, from 24 identical samples for each of 19 massage modality benefits or contraindications, so the counts are not necessary because there won't be much variance if any, and it was only if there was a count greater than zero that interested this script's focus. But it is useful to have the counts listed above for each ngram.
+
+Right now, the goal is to build the same extracted tokens as we did earlier in python then use a function to wrap around a user input that will tokenize the input and transform it into the same matrices as was done in python. I am not sure how or what programs to use in R to do that at the moment and won't spend time searching to finish this task. So it is tempting to switch back to python using R's reticulate library to run python script in the RStudio console. But the whole purpose of this section is to build a program that will:
+
+1.) Use input from a user and tokenize the input by:
+    a.) lemmatizing the input
+    b.) extracting the:
+        i.) unigrams
+        ii.) bigrams
+        iii.) trigrams
+    
+2.) Then take those lemmatized ngrams, and:
+    a.) compare to our tokenized list of contraindications for all modalities
+    b.) create a list of every modality the input is a contraindication for
+    c.) create a list of available massages by:
+        i.) removing any modality in 2.b for the user to choose from
+        ii.) this will be a separate list of available modalities
+    
+3.) take the uni and bi gram lemmatized tokens of the user input in 1.b then:
+    a.) compare to the list of available modalities in 2.c.ii. and make a list
+    b.) from this list, any of the tokens that match the user input tokens:
+        i.) add to a list of recommended massage modality
+        ii.) here the more tokens per modality is needed from user input tokens
+        to select the modality with the highest counts of tokens for benefits
+        iii.) If there is a tie for massage modality recommended, then output all
+        available massages and:
+            -also provide the massage modality description
+            -also provide the massage modality side effects
+            
+
+We will use a program defined request.
+```{r}
+
+userInput <- function(input){
+    input <- as.character(paste(input))
+    input
+    
+}
+
+print('Please explain what brings you in for a massage today, such as if you want to relax, its a gift, you have a headache, stressed at work, pain in the body, sore workouts, and briefly what your health is like and history of health.')
+  
+```
+
+```{r}
+input1 <- userInput('I have had headaches off and on, have seasonal allergies, my sleep is good, I have a history of stroke, and am on blood pressure medicine.')
+input2 <- userInput('I just want to relax, and get massages regularly at a local massage place. I don\'t have any pre-existing health conditions and like a deep pressure with focus on my upper back. I am over a cold that I had two weeks ago. I have a sunburn on my face, that you could avoid.')
+input3 <- userInput('I have leukemia, but want cupping done. My neighbor says it is good for me and I never tried it. Also, I need medium to deep pressure and don\'t want a light massage.')
+input1
+input2
+input3
+```
+
+The problem with using the function is that escape characters need to be used. When using the readline() there is no need to worry about that.The following won't display because it is set to FALSE for eval= in the r chunk header, but shows what it could be in a program.
+```{r,eval=FALSE}
+input1 <- readline('What makes you want a massage today? please explain your sleep, stress, health, health history, pressure used to, and last massage.')
+
+```
+
+Now to tokenize these user inputs. We need to create three functions that will get the uni, bi, and tri grams.
+```{r}
+uni <- as.character(c(' '))
+unitoken <- function(input){
+    lemm1 <- lemmatize_strings(input, dictionary=lexicon::hash_lemmas)
+    Lemm1 <- tibble(line=1, unigram=lemm1)
+    unigram <- unnest_tokens(Lemm1,userUnigram, unigram,token='ngrams',n=1)
+    uniNoStops <- filter(unigram, !userUnigram %in% stop_words$word)
+    uniNoStops1 <- as.character(paste(uniNoStops$userUnigram))
+    uniNoStops1
+    
+}
+
+unoInput1 <- unitoken(input1)
+unoInput1
+```
+
+
+```{r}
+bitoken <- function(input){
+    lemm2 <- lemmatize_strings(input, dictionary=lexicon::hash_lemmas)
+    Lemm2 <- tibble(line=1, bigram=lemm2)
+    bigram <- unnest_tokens(Lemm2,userBigram, bigram,token='ngrams',n=2)
+    bigram_separate <- bigram %>% separate(userBigram,
+                                             c('word1','word2'), sep=' ')
+    bigram_noStops <- bigram_separate %>% 
+        filter(!word1 %in% stop_words$word) %>% 
+        filter(!word2 %in% stop_words$word) 
+    bigram <- as.character(paste(bigram_noStops$word1,bigram_noStops$word2))
+    bigram
+}
+
+dosInput1 <- bitoken(input1)
+dosInput1
+
+```
+
+
+```{r}
+tritoken <- function(input){
+    lemm3 <- lemmatize_strings(input, dictionary=lexicon::hash_lemmas)
+    Lemm3 <- tibble(line=1, trigram=lemm3)
+    trigram <- unnest_tokens(Lemm3,userTrigram, trigram, token='ngrams',n=3)
+    trigram_separate <- trigram %>% separate(userTrigram, c('word1','word2','word3'), sep=' ')
+    trigram_noStops <- trigram_separate %>% 
+        filter(!word1 %in% stop_words$word) %>% 
+        filter(!word2 %in% stop_words$word) %>%
+        filter(!word3 %in% stop_words$word)
+        
+    trigram <- as.character(paste(trigram_noStops$word1,trigram_noStops$word2,
+                                  trigram_noStops$word3))
+    trigram
+}
+
+tresInput1 <- tritoken(input1)
+tresInput1
+```
+
+Combine into one function the uni, bi, and tri grams.
+```{r}
+uniBiTriTokens <- function(input){
+
+    lemm1 <- lemmatize_strings(input, dictionary=lexicon::hash_lemmas)
+    Lemm1 <- tibble(line=1, unigram=lemm1)
+    unigram <- unnest_tokens(Lemm1,userUnigram, unigram,token='ngrams',n=1)
+    uniNoStops <- filter(unigram, !userUnigram %in% stop_words$word)
+    ungram <- uniNoStops$userUnigram
+    
+    Lemm2 <- tibble(line=1, bigram=lemm1)
+    bigram <- unnest_tokens(Lemm2,userBigram, bigram,token='ngrams',n=2)
+    bigram_separate <- bigram %>% separate(userBigram,
+                                             c('word1','word2'), sep=' ')
+    bigram_noStops <- bigram_separate %>% 
+        filter(!word1 %in% stop_words$word) %>% 
+        filter(!word2 %in% stop_words$word) 
+    bigram <- as.character(paste(bigram_noStops$word1,bigram_noStops$word2))
+
+    Lemm3 <- tibble(line=1, trigram=lemm1)
+    trigram <- unnest_tokens(Lemm3,userTrigram, trigram, token='ngrams',n=3)
+    trigram_separate <- trigram %>% separate(userTrigram, c('word1','word2','word3'), sep=' ')
+    trigram_noStops <- trigram_separate %>% 
+        filter(!word1 %in% stop_words$word) %>% 
+        filter(!word2 %in% stop_words$word) %>%
+        filter(!word3 %in% stop_words$word)
+        
+    trigram <- as.character(paste(trigram_noStops$word1,
+                                  trigram_noStops$word2,trigram_noStops$word3))
+    bt <- append(bigram,trigram, after=length(bigram))
+    uniBiTriToken <-append(ungram, bt, after=length(ungram))
+    uniBiTriToken
+}
+
+unDosTresGram <- uniBiTriTokens(input1)
+unDosTresGram
+```
+
+We have our list and function that will produce the bigrams, trigrams, and unigrams of a single user input. Now we need to compare this list of preprocessed, lemmatized, ngram tokens to the lists of tokens in each contraindication for each massage modality. And build a list of modalities this user input is not recommended. From there, we will compare that list of available modalities, to the list of tokens in the benefits of those modalities, and only keep those modalities the user input is recommended based on his or her input. 
+
+As an aside, this would probably be similar to the automated prompts to most telecommunications and major credit cards like Capital One or Macy's, where a user might possibly get lost, know what they want but don't know how to input according to these tokens. That would not be a desired outcome of this model. But textual recommender, not based on voice to text recommendations. So the better the user inputs his or her health and massage goals the better the results, but also the better fine tuned our benefits and contraindications for how a user would input for example, a heart condition or symptoms related to health conditions, like a fever could vary user to user. 
+As a refresher, our named lists of contraindications within each modality are: 
+
+- CBD_contraindications1
+- Cranio_contraindications1
+- Reflex_contraindications1
+- Lymph_contraindications1
+- Mgn_contraindications1
+- TPT_contraindications1
+- Instrument_contraindications1
+- DT_contraindications1
+- swedish_contraindications1
+- Aroma_contraindications1
+- stretch_contraindications1
+- cold_contraindications1
+- Freeze_contraindications1
+- Sports_contraindications1
+- Cupping_contraindications1
+- HotStone_contraindications1
+- Shiatsu_contraindications1
+- Prenatal_contraindications1
+- Myofascial_contraindications1
+
+Our function that separates the user input into bi-tri-uni-tokens is called uniBiTriTokens(), with the user input as the only argument as a string. We stored the first input as unDosTresGram.
+This is the list we need to compare to every modality list above to see if any of the tokens are in that list, and create a list that will be a list of unavailable massages.
+```{r}
+unDosTresGram
+CBD_contraindications1
+```
+The above shows the list of tokens in the user input, then the list of contraindications for CBD as a massage modality.
+```{r}
+testCBD_contra <- ifelse(unDosTresGram %in%  CBD_contraindications1,1,0)
+l <- length(unDosTresGram)
+s <- sum(testCBD_contra)
+l
+s
+notlikelyCBD <- round(s/l,2)
+notlikelyCBD
+unDosTresGram[testCBD_contra>0]
+input1
+```
+
+Lets look at the contraindications for CBD to see how the input compares.
+```{r}
+cbd <- subset(modes, modes$modality=='Cannabidiol (CBD) Massage Balm')[1,4]
+cbd
+```
+
+
+Lets create a function to do just this for all 19 massage modalities. It will return a percent of not recommended that the modality is a contraindication for the user. The input would be the output of the user input from the uniBiTriTokens stored as a variable, so that the variable would be the input to this function, we will name notRecommended().
+```{r}
+
+notRecommended <- function(uniBiTriTokensOutputVar){
+    
+        testCBD <- ifelse(uniBiTriTokensOutputVar %in%  CBD_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCBD)
+        cbd <- round(s/l,2)
+
+        testCranio <- ifelse(uniBiTriTokensOutputVar %in%  Cranio_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCranio)
+        craniosacral <- round(s/l,2)
+
+        testReflex <- ifelse(uniBiTriTokensOutputVar %in%  Reflex_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testReflex)
+        reflexology <- round(s/l,2)
+
+        testLymph <- ifelse(uniBiTriTokensOutputVar %in%  Lymph_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testLymph)
+        lymphatic <- round(s/l,2)
+
+        testMGN <- ifelse(uniBiTriTokensOutputVar %in%  Mgn_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testMGN)
+        massagegun <- round(s/l,2)
+
+        testIASTM <- ifelse(uniBiTriTokensOutputVar %in%  Instrument_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testIASTM)
+        IASTM <- round(s/l,2)
+
+        testDT <- ifelse(uniBiTriTokensOutputVar %in%  DT_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testDT)
+        deepTissue <- round(s/l,2)
+
+        testSwedish <- ifelse(uniBiTriTokensOutputVar %in% swedish_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testSwedish)
+        swedish <- round(s/l,2)
+
+        testAroma <- ifelse(uniBiTriTokensOutputVar %in%  Aroma_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testAroma)
+        aromatherapy <- round(s/l,2)
+
+        testStretch <- ifelse(uniBiTriTokensOutputVar %in%  stretch_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testStretch)
+        stretch <- round(s/l,2)
+
+        testTPT <- ifelse(uniBiTriTokensOutputVar %in%  TPT_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testTPT)
+        triggerPoint <- round(s/l,2)
+
+        testHS <- ifelse(uniBiTriTokensOutputVar %in%  HotStone_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testHS)
+        hotStone <- round(s/l,2)
+
+        testCups <- ifelse(uniBiTriTokensOutputVar %in%  Cupping_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCups)
+        cupping <- round(s/l,2)
+
+        testSports <- ifelse(uniBiTriTokensOutputVar %in%  Sports_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testSports)
+        sports <- round(s/l,2)
+
+        testFreeze <- ifelse(uniBiTriTokensOutputVar %in%  Freeze_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testFreeze)
+        biofreeze <- round(s/l,2)
+
+        testCold <- ifelse(uniBiTriTokensOutputVar %in%  cold_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCold)
+        coldStone <- round(s/l,2)
+
+        testShiatsu <- ifelse(uniBiTriTokensOutputVar %in%  Shiatsu_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testShiatsu)
+        shiatsu <- round(s/l,2)
+
+        testPreg <- ifelse(uniBiTriTokensOutputVar %in%  Prenatal_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testPreg)
+        prenatal <- round(s/l,2)
+
+        testMyo <- ifelse(uniBiTriTokensOutputVar %in%  Myofascial_contraindications1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testMyo)
+        myofascial <- round(s/l,2)
+        
+        names <- c("Cannabidiol (CBD) Massage Balm","Craniosacral Massage","Reflexology Massage","Lymphatic Drainage Massage","Massage Gun Therapy","Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage", "Deep tissue Massage","Swedish Massage","Aromatherapy","Stretching","Trigger Point Therapy","Hot Stone Therapy Massage", "Cupping Therapy","Sports Massage","Biofreeze Muscle Pain Relief Gel","Cold Stone Therapy","Shiatsu Massage","Prenatal Massage","Myofascial Massage")
+        
+        probs <- c(cbd,craniosacral,reflexology,lymphatic,massagegun,IASTM,deepTissue,
+                   swedish,aromatherapy,stretch,triggerPoint,hotStone,cupping,sports,
+                   biofreeze,coldStone,shiatsu,prenatal,myofascial)
+        
+        probabilities <- as.data.frame(cbind(names,probs))
+        colnames(probabilities) <- c('modality','probability')
+        probabilities$probability <- as.numeric(paste(probabilities$probability))
+        
+        probabilities1 <- subset(probabilities,
+                                 probabilities$probability>min(probabilities$probability))
+        probabilities1
+}
+```
+
+```{r}
+nr <- notRecommended(unDosTresGram)
+nr
+```
+
+Now that we have the list of massages not to recommend for this user's input, we can compare those tokens in the user input to the benefits tokens for each massage modality not in the modalities not recommended.
+```{r}
+NR <- as.character(paste(nr$modality))
+NR
+```
+
+```{r}
+
+modesList <- as.character(paste(unique(modes$modality)))
+availModes <- !modesList %in% NR
+availModes
+available <- modesList[availModes]
+available
+```
+
+Now that we have our avaiable massage modalities, lets get the best recommended massages from this list to recommend a massage for our user's input tokens.The uniBiTriTokens output that was stored as a variable is used, and inside this function, modesRecommended(), it will calculate all probability recommended massages based on our filtered benefits lists of each 19 modes, then return a list of available massages that aren't in our notRecommended list and with a higher probability based on the user input tokens to be recommended compared with each modality's benefits. We will modify the function above but replace the contraindications for each modality with the benefits. The benefits lists built earlier are:
+- benefits_cbd1 
+- benefits_cranio1 
+- benefits_reflex1  
+- benefits_lymph1 
+- benefits_mgn1 
+- benefits_tpt1 
+- benefits_instrument1 
+- benefits_DT1 
+- benefits_swedish1 
+- benefits_aroma1 
+- benefits_stretch1 
+- benefits_cold1 
+- benefits_freeze1 
+- benefits_sports1 
+- benefits_cup1 
+- benefits_HotStone1 
+- benefits_shiatsu1 
+- benefits_prenatal1 
+- benefits_myofascial1
+
+The stored variable for our input, uniBiTriTokensOutputVar, is unDosTresGrams.
+```{r}
+
+modesRecommended <- function(uniBiTriTokensOutputVar){
+    
+        testCBD <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cbd1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCBD)
+        cbd <- round(s/l,2)
+
+        testCranio <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cranio1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCranio)
+        craniosacral <- round(s/l,2)
+
+        testReflex <- ifelse(uniBiTriTokensOutputVar %in%  benefits_reflex1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testReflex)
+        reflexology <- round(s/l,2)
+
+        testLymph <- ifelse(uniBiTriTokensOutputVar %in%  benefits_lymph1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testLymph)
+        lymphatic <- round(s/l,2)
+
+        testMGN <- ifelse(uniBiTriTokensOutputVar %in%  benefits_mgn1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testMGN)
+        massagegun <- round(s/l,2)
+
+        testIASTM <- ifelse(uniBiTriTokensOutputVar %in%  benefits_instrument1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testIASTM)
+        IASTM <- round(s/l,2)
+
+        testDT <- ifelse(uniBiTriTokensOutputVar %in%  benefits_DT1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testDT)
+        deepTissue <- round(s/l,2)
+
+        testSwedish <- ifelse(uniBiTriTokensOutputVar %in% benefits_swedish1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testSwedish)
+        swedish <- round(s/l,2)
+
+        testAroma <- ifelse(uniBiTriTokensOutputVar %in%  benefits_aroma1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testAroma)
+        aromatherapy <- round(s/l,2)
+
+        testStretch <- ifelse(uniBiTriTokensOutputVar %in%  benefits_stretch1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testStretch)
+        stretch <- round(s/l,2)
+
+        testTPT <- ifelse(uniBiTriTokensOutputVar %in%  benefits_tpt1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testTPT)
+        triggerPoint <- round(s/l,2)
+
+        testHS <- ifelse(uniBiTriTokensOutputVar %in%  benefits_HotStone1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testHS)
+        hotStone <- round(s/l,2)
+
+        testCups <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cup1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCups)
+        cupping <- round(s/l,2)
+
+        testSports <- ifelse(uniBiTriTokensOutputVar %in%  benefits_sports1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testSports)
+        sports <- round(s/l,2)
+
+        testFreeze <- ifelse(uniBiTriTokensOutputVar %in%  benefits_freeze1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testFreeze)
+        biofreeze <- round(s/l,2)
+
+        testCold <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cold1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testCold)
+        coldStone <- round(s/l,2)
+
+        testShiatsu <- ifelse(uniBiTriTokensOutputVar %in%  benefits_shiatsu1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testShiatsu)
+        shiatsu <- round(s/l,2)
+
+        testPreg <- ifelse(uniBiTriTokensOutputVar %in%  benefits_prenatal1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testPreg)
+        prenatal <- round(s/l,2)
+
+        testMyo <- ifelse(uniBiTriTokensOutputVar %in%  benefits_myofascial1,1,0)
+        l <- length(uniBiTriTokensOutputVar)
+        s <- sum(testMyo)
+        myofascial <- round(s/l,2)
+        
+        names <- c("Cannabidiol (CBD) Massage Balm","Craniosacral Massage","Reflexology Massage","Lymphatic Drainage Massage","Massage Gun Therapy","Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage", "Deep tissue Massage","Swedish Massage","Aromatherapy","Stretching","Trigger Point Therapy","Hot Stone Therapy Massage", "Cupping Therapy","Sports Massage","Biofreeze Muscle Pain Relief Gel","Cold Stone Therapy","Shiatsu Massage","Prenatal Massage","Myofascial Massage")
+        
+        probs <- c(cbd,craniosacral,reflexology,lymphatic,massagegun,IASTM,deepTissue,
+                   swedish,aromatherapy,stretch,triggerPoint,hotStone,cupping,sports,
+                   biofreeze,coldStone,shiatsu,prenatal,myofascial)
+        
+        probabilities <- as.data.frame(cbind(names,probs))
+        colnames(probabilities) <- c('modality','probability')
+        probabilities$probability <- as.numeric(paste(probabilities$probability))
+        
+        probabilities0 <- probabilities %>% filter(probabilities$modality %in% available)
+        
+        probabilities01 <- probabilities0[order(probabilities0$probability, decreasing=TRUE),]
+        print(probabilities01)
+        
+        probs <- as.character(paste(probabilities01$modality))
+        
+        print('Your top choices for your recommended massage modalities based on your user input are: ')
+        # print(probs[1])
+        # print(probs[2])
+        # print(probs[3])
+        # print('Thank you.')
+        probs[1:3]
+        
+}
+
+```
+
+```{r}
+reccMode <- modesRecommended(unDosTresGram)
+reccMode
+```
+
+
+Lets make this function look pretty, but not using any pretty packaging of a related design. Just clean it up and combine it to work in an online app.
+***
+
+# Version 1
+
+```{r}
+
+massageModalityRecommender <- function(input){
+  
+  lemm1 <- lemmatize_strings(input, dictionary=lexicon::hash_lemmas)
+  Lemm1 <- tibble(line=1, unigram=lemm1)
+  unigram <- unnest_tokens(Lemm1,userUnigram, unigram,token='ngrams',n=1)
+  uniNoStops <- filter(unigram, !userUnigram %in% stop_words$word)
+  ungram <- uniNoStops$userUnigram
+  
+  Lemm2 <- tibble(line=1, bigram=lemm1)
+  bigram <- unnest_tokens(Lemm2,userBigram, bigram,token='ngrams',n=2)
+  bigram_separate <- bigram %>% separate(userBigram,
+                                         c('word1','word2'), sep=' ')
+  bigram_noStops <- bigram_separate %>% 
+    filter(!word1 %in% stop_words$word) %>% 
+    filter(!word2 %in% stop_words$word) 
+  bigram <- as.character(paste(bigram_noStops$word1,bigram_noStops$word2))
+  
+  Lemm3 <- tibble(line=1, trigram=lemm1)
+  trigram <- unnest_tokens(Lemm3,userTrigram, trigram, token='ngrams',n=3)
+  trigram_separate <- trigram %>% separate(userTrigram, c('word1','word2','word3'), sep=' ')
+  trigram_noStops <- trigram_separate %>% 
+    filter(!word1 %in% stop_words$word) %>% 
+    filter(!word2 %in% stop_words$word) %>%
+    filter(!word3 %in% stop_words$word)
+  
+  trigram <- as.character(paste(trigram_noStops$word1,
+                                trigram_noStops$word2,trigram_noStops$word3))
+  bt <- append(bigram,trigram, after=length(bigram))
+  uniBiTriToken <-append(ungram, bt, after=length(ungram))
+  uniBiTriTokensOutputVar <- uniBiTriToken
+
+  testCBD <- ifelse(uniBiTriTokensOutputVar %in%  CBD_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCBD)
+  cbd <- round(s/l,2)
+  
+  testCranio <- ifelse(uniBiTriTokensOutputVar %in%  Cranio_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCranio)
+  craniosacral <- round(s/l,2)
+  
+  testReflex <- ifelse(uniBiTriTokensOutputVar %in%  Reflex_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testReflex)
+  reflexology <- round(s/l,2)
+  
+  testLymph <- ifelse(uniBiTriTokensOutputVar %in%  Lymph_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testLymph)
+  lymphatic <- round(s/l,2)
+  
+  testMGN <- ifelse(uniBiTriTokensOutputVar %in%  Mgn_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMGN)
+  massagegun <- round(s/l,2)
+  
+  testIASTM <- ifelse(uniBiTriTokensOutputVar %in%  Instrument_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testIASTM)
+  IASTM <- round(s/l,2)
+  
+  testDT <- ifelse(uniBiTriTokensOutputVar %in%  DT_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testDT)
+  deepTissue <- round(s/l,2)
+  
+  testSwedish <- ifelse(uniBiTriTokensOutputVar %in% swedish_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSwedish)
+  swedish <- round(s/l,2)
+  
+  testAroma <- ifelse(uniBiTriTokensOutputVar %in%  Aroma_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testAroma)
+  aromatherapy <- round(s/l,2)
+  
+  testStretch <- ifelse(uniBiTriTokensOutputVar %in%  stretch_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testStretch)
+  stretch <- round(s/l,2)
+  
+  testTPT <- ifelse(uniBiTriTokensOutputVar %in%  TPT_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testTPT)
+  triggerPoint <- round(s/l,2)
+  
+  testHS <- ifelse(uniBiTriTokensOutputVar %in%  HotStone_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testHS)
+  hotStone <- round(s/l,2)
+  
+  testCups <- ifelse(uniBiTriTokensOutputVar %in%  Cupping_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCups)
+  cupping <- round(s/l,2)
+  
+  testSports <- ifelse(uniBiTriTokensOutputVar %in%  Sports_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSports)
+  sports <- round(s/l,2)
+  
+  testFreeze <- ifelse(uniBiTriTokensOutputVar %in%  Freeze_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testFreeze)
+  biofreeze <- round(s/l,2)
+  
+  testCold <- ifelse(uniBiTriTokensOutputVar %in%  cold_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCold)
+  coldStone <- round(s/l,2)
+  
+  testShiatsu <- ifelse(uniBiTriTokensOutputVar %in%  Shiatsu_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testShiatsu)
+  shiatsu <- round(s/l,2)
+  
+  testPreg <- ifelse(uniBiTriTokensOutputVar %in%  Prenatal_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testPreg)
+  prenatal <- round(s/l,2)
+  
+  testMyo <- ifelse(uniBiTriTokensOutputVar %in%  Myofascial_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMyo)
+  myofascial <- round(s/l,2)
+  
+  names <- c("Cannabidiol (CBD) Massage Balm","Craniosacral Massage","Reflexology Massage","Lymphatic Drainage Massage","Massage Gun Therapy","Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage", "Deep tissue Massage","Swedish Massage","Aromatherapy","Stretching","Trigger Point Therapy","Hot Stone Therapy Massage", "Cupping Therapy","Sports Massage","Biofreeze Muscle Pain Relief Gel","Cold Stone Therapy","Shiatsu Massage","Prenatal Massage","Myofascial Massage")
+  
+  probs <- c(cbd,craniosacral,reflexology,lymphatic,massagegun,IASTM,deepTissue,
+             swedish,aromatherapy,stretch,triggerPoint,hotStone,cupping,sports,
+             biofreeze,coldStone,shiatsu,prenatal,myofascial)
+  
+  probabilities <- as.data.frame(cbind(names,probs))
+  colnames(probabilities) <- c('modality','probability')
+  probabilities$probability <- as.numeric(paste(probabilities$probability))
+  
+  probabilities1 <- subset(probabilities,
+                           probabilities$probability>min(probabilities$probability))
+  
+  NR <- as.character(paste(probabilities1$modality))
+  availModes <- !names %in% NR
+  available <- names[availModes]
+
+  testCBD1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cbd1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCBD1)
+  cbd1 <- round(s/l,2)
+  
+  testCranio1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cranio1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCranio1)
+  craniosacral1 <- round(s/l,2)
+  
+  testReflex1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_reflex1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testReflex1)
+  reflexology1 <- round(s/l,2)
+  
+  testLymph1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_lymph1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testLymph1)
+  lymphatic1 <- round(s/l,2)
+  
+  testMGN1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_mgn1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMGN1)
+  massagegun1 <- round(s/l,2)
+  
+  testIASTM1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_instrument1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testIASTM1)
+  IASTM1 <- round(s/l,2)
+  
+  testDT1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_DT1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testDT1)
+  deepTissue1 <- round(s/l,2)
+  
+  testSwedish1 <- ifelse(uniBiTriTokensOutputVar %in% benefits_swedish1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSwedish1)
+  swedish1 <- round(s/l,2)
+  
+  testAroma1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_aroma1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testAroma1)
+  aromatherapy1 <- round(s/l,2)
+  
+  testStretch1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_stretch1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testStretch1)
+  stretch1 <- round(s/l,2)
+  
+  testTPT1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_tpt1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testTPT1)
+  triggerPoint1 <- round(s/l,2)
+  
+  testHS1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_HotStone1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testHS1)
+  hotStone1 <- round(s/l,2)
+  
+  testCups1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cup1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCups1)
+  cupping1 <- round(s/l,2)
+  
+  testSports1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_sports1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSports1)
+  sports1 <- round(s/l,2)
+  
+  testFreeze1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_freeze1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testFreeze1)
+  biofreeze1 <- round(s/l,2)
+  
+  testCold1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cold1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCold1)
+  coldStone1 <- round(s/l,2)
+  
+  testShiatsu1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_shiatsu1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testShiatsu1)
+  shiatsu1 <- round(s/l,2)
+  
+  testPreg1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_prenatal1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testPreg1)
+  prenatal1 <- round(s/l,2)
+  
+  testMyo1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_myofascial1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMyo1)
+  myofascial1 <- round(s/l,2)
+  
+  names1 <- c("Cannabidiol (CBD) Massage Balm","Craniosacral Massage","Reflexology Massage","Lymphatic Drainage Massage","Massage Gun Therapy","Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage", "Deep tissue Massage","Swedish Massage","Aromatherapy","Stretching","Trigger Point Therapy","Hot Stone Therapy Massage", "Cupping Therapy","Sports Massage","Biofreeze Muscle Pain Relief Gel","Cold Stone Therapy","Shiatsu Massage","Prenatal Massage","Myofascial Massage")
+  
+  probs <- c(cbd1,craniosacral1,reflexology1,lymphatic1,massagegun1,IASTM1,deepTissue1,
+             swedish1,aromatherapy1,stretch1,triggerPoint1,hotStone1,cupping1,sports1,
+             biofreeze1,coldStone1,shiatsu1,prenatal1,myofascial1)
+  
+  probabilities <- as.data.frame(cbind(names1,probs))
+  colnames(probabilities) <- c('modality','probability')
+  probabilities$probability <- as.numeric(paste(probabilities$probability))
+  
+  probabilities0 <- probabilities %>% filter(probabilities$modality %in% available)
+  
+  probabilities01 <- probabilities0[order(probabilities0$probability, decreasing=TRUE),]
+  print(probabilities01)
+  
+  probs <- as.character(paste(probabilities01$modality))
+  
+  print('Your top choices for your recommended massage modalities based on your user input are: ')
+  probs[1:3]
+  
+}
+
+```
+
+
+```{r}
+massageModalityRecommender(input1)
+```
+Great! The function works as planned.
+
+***
+
+# Version 2
+
+This version is the same function above but, we will add in that the return also show each recommended massage modality's description, benefits, and side effects. We will use the modesUnique table to pull the description, benefits, and side effects from when returning those features' information for each recommended modality only.
+```{r}
+
+massageModalityRecommender2 <- function(input){
+  
+  lemm1 <- lemmatize_strings(input, dictionary=lexicon::hash_lemmas)
+  Lemm1 <- tibble(line=1, unigram=lemm1)
+  unigram <- unnest_tokens(Lemm1,userUnigram, unigram,token='ngrams',n=1)
+  uniNoStops <- filter(unigram, !userUnigram %in% stop_words$word)
+  ungram <- uniNoStops$userUnigram
+  
+  Lemm2 <- tibble(line=1, bigram=lemm1)
+  bigram <- unnest_tokens(Lemm2,userBigram, bigram,token='ngrams',n=2)
+  bigram_separate <- bigram %>% separate(userBigram,
+                                         c('word1','word2'), sep=' ')
+  bigram_noStops <- bigram_separate %>% 
+    filter(!word1 %in% stop_words$word) %>% 
+    filter(!word2 %in% stop_words$word) 
+  bigram <- as.character(paste(bigram_noStops$word1,bigram_noStops$word2))
+  
+  Lemm3 <- tibble(line=1, trigram=lemm1)
+  trigram <- unnest_tokens(Lemm3,userTrigram, trigram, token='ngrams',n=3)
+  trigram_separate <- trigram %>% separate(userTrigram, c('word1','word2','word3'), sep=' ')
+  trigram_noStops <- trigram_separate %>% 
+    filter(!word1 %in% stop_words$word) %>% 
+    filter(!word2 %in% stop_words$word) %>%
+    filter(!word3 %in% stop_words$word)
+  
+  trigram <- as.character(paste(trigram_noStops$word1,
+                                trigram_noStops$word2,trigram_noStops$word3))
+  bt <- append(bigram,trigram, after=length(bigram))
+  uniBiTriToken <-append(ungram, bt, after=length(ungram))
+  uniBiTriTokensOutputVar <- uniBiTriToken
+
+  testCBD <- ifelse(uniBiTriTokensOutputVar %in%  CBD_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCBD)
+  cbd <- round(s/l,2)
+  
+  testCranio <- ifelse(uniBiTriTokensOutputVar %in%  Cranio_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCranio)
+  craniosacral <- round(s/l,2)
+  
+  testReflex <- ifelse(uniBiTriTokensOutputVar %in%  Reflex_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testReflex)
+  reflexology <- round(s/l,2)
+  
+  testLymph <- ifelse(uniBiTriTokensOutputVar %in%  Lymph_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testLymph)
+  lymphatic <- round(s/l,2)
+  
+  testMGN <- ifelse(uniBiTriTokensOutputVar %in%  Mgn_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMGN)
+  massagegun <- round(s/l,2)
+  
+  testIASTM <- ifelse(uniBiTriTokensOutputVar %in%  Instrument_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testIASTM)
+  IASTM <- round(s/l,2)
+  
+  testDT <- ifelse(uniBiTriTokensOutputVar %in%  DT_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testDT)
+  deepTissue <- round(s/l,2)
+  
+  testSwedish <- ifelse(uniBiTriTokensOutputVar %in% swedish_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSwedish)
+  swedish <- round(s/l,2)
+  
+  testAroma <- ifelse(uniBiTriTokensOutputVar %in%  Aroma_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testAroma)
+  aromatherapy <- round(s/l,2)
+  
+  testStretch <- ifelse(uniBiTriTokensOutputVar %in%  stretch_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testStretch)
+  stretch <- round(s/l,2)
+  
+  testTPT <- ifelse(uniBiTriTokensOutputVar %in%  TPT_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testTPT)
+  triggerPoint <- round(s/l,2)
+  
+  testHS <- ifelse(uniBiTriTokensOutputVar %in%  HotStone_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testHS)
+  hotStone <- round(s/l,2)
+  
+  testCups <- ifelse(uniBiTriTokensOutputVar %in%  Cupping_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCups)
+  cupping <- round(s/l,2)
+  
+  testSports <- ifelse(uniBiTriTokensOutputVar %in%  Sports_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSports)
+  sports <- round(s/l,2)
+  
+  testFreeze <- ifelse(uniBiTriTokensOutputVar %in%  Freeze_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testFreeze)
+  biofreeze <- round(s/l,2)
+  
+  testCold <- ifelse(uniBiTriTokensOutputVar %in%  cold_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCold)
+  coldStone <- round(s/l,2)
+  
+  testShiatsu <- ifelse(uniBiTriTokensOutputVar %in%  Shiatsu_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testShiatsu)
+  shiatsu <- round(s/l,2)
+  
+  testPreg <- ifelse(uniBiTriTokensOutputVar %in%  Prenatal_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testPreg)
+  prenatal <- round(s/l,2)
+  
+  testMyo <- ifelse(uniBiTriTokensOutputVar %in%  Myofascial_contraindications1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMyo)
+  myofascial <- round(s/l,2)
+  
+  names <- c("Cannabidiol (CBD) Massage Balm","Craniosacral Massage","Reflexology Massage","Lymphatic Drainage Massage","Massage Gun Therapy","Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage", "Deep tissue Massage","Swedish Massage","Aromatherapy","Stretching","Trigger Point Therapy","Hot Stone Therapy Massage", "Cupping Therapy","Sports Massage","Biofreeze Muscle Pain Relief Gel","Cold Stone Therapy","Shiatsu Massage","Prenatal Massage","Myofascial Massage")
+  
+  probs <- c(cbd,craniosacral,reflexology,lymphatic,massagegun,IASTM,deepTissue,
+             swedish,aromatherapy,stretch,triggerPoint,hotStone,cupping,sports,
+             biofreeze,coldStone,shiatsu,prenatal,myofascial)
+  
+  probabilities <- as.data.frame(cbind(names,probs))
+  colnames(probabilities) <- c('modality','probability')
+  probabilities$probability <- as.numeric(paste(probabilities$probability))
+  
+  probabilities1 <- subset(probabilities,
+                           probabilities$probability>min(probabilities$probability))
+  
+  NR <- as.character(paste(probabilities1$modality))
+  availModes <- !names %in% NR
+  available <- names[availModes]
+
+  testCBD1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cbd1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCBD1)
+  cbd1 <- round(s/l,2)
+  
+  testCranio1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cranio1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCranio1)
+  craniosacral1 <- round(s/l,2)
+  
+  testReflex1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_reflex1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testReflex1)
+  reflexology1 <- round(s/l,2)
+  
+  testLymph1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_lymph1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testLymph1)
+  lymphatic1 <- round(s/l,2)
+  
+  testMGN1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_mgn1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMGN1)
+  massagegun1 <- round(s/l,2)
+  
+  testIASTM1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_instrument1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testIASTM1)
+  IASTM1 <- round(s/l,2)
+  
+  testDT1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_DT1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testDT1)
+  deepTissue1 <- round(s/l,2)
+  
+  testSwedish1 <- ifelse(uniBiTriTokensOutputVar %in% benefits_swedish1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSwedish1)
+  swedish1 <- round(s/l,2)
+  
+  testAroma1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_aroma1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testAroma1)
+  aromatherapy1 <- round(s/l,2)
+  
+  testStretch1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_stretch1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testStretch1)
+  stretch1 <- round(s/l,2)
+  
+  testTPT1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_tpt1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testTPT1)
+  triggerPoint1 <- round(s/l,2)
+  
+  testHS1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_HotStone1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testHS1)
+  hotStone1 <- round(s/l,2)
+  
+  testCups1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cup1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCups1)
+  cupping1 <- round(s/l,2)
+  
+  testSports1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_sports1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testSports1)
+  sports1 <- round(s/l,2)
+  
+  testFreeze1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_freeze1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testFreeze1)
+  biofreeze1 <- round(s/l,2)
+  
+  testCold1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_cold1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testCold1)
+  coldStone1 <- round(s/l,2)
+  
+  testShiatsu1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_shiatsu1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testShiatsu1)
+  shiatsu1 <- round(s/l,2)
+  
+  testPreg1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_prenatal1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testPreg1)
+  prenatal1 <- round(s/l,2)
+  
+  testMyo1 <- ifelse(uniBiTriTokensOutputVar %in%  benefits_myofascial1,1,0)
+  l <- length(uniBiTriTokensOutputVar)
+  s <- sum(testMyo1)
+  myofascial1 <- round(s/l,2)
+  
+  names1 <- c("Cannabidiol (CBD) Massage Balm","Craniosacral Massage","Reflexology Massage","Lymphatic Drainage Massage","Massage Gun Therapy","Instrument Assisted Soft Tissue Mobilization (IASTM) Friction Massage", "Deep tissue Massage","Swedish Massage","Aromatherapy","Stretching","Trigger Point Therapy","Hot Stone Therapy Massage", "Cupping Therapy","Sports Massage","Biofreeze Muscle Pain Relief Gel","Cold Stone Therapy","Shiatsu Massage","Prenatal Massage","Myofascial Massage")
+  
+  probs <- c(cbd1,craniosacral1,reflexology1,lymphatic1,massagegun1,IASTM1,deepTissue1,
+             swedish1,aromatherapy1,stretch1,triggerPoint1,hotStone1,cupping1,sports1,
+             biofreeze1,coldStone1,shiatsu1,prenatal1,myofascial1)
+  
+  probabilities <- as.data.frame(cbind(names1,probs))
+  colnames(probabilities) <- c('modality','probability')
+  probabilities$probability <- as.numeric(paste(probabilities$probability))
+  
+  probabilities0 <- probabilities %>% filter(probabilities$modality %in% available)
+  
+  probabilities01 <- probabilities0[order(probabilities0$probability, decreasing=TRUE),]
+  print(probabilities01)
+  
+  probs <- as.character(paste(probabilities01$modality))
+  
+  probs3 <- probs[1:3]
+  
+  modesUnique$modality <- as.character(paste(modesUnique$modality))
+  modesUnique$Description <- as.character(paste(modesUnique$Description))
+  modesUnique$sideEffects <- as.character(paste(modesUnique$sideEffects))
+  modesUnique$benefits <- as.character(paste(modesUnique$benefits))
+  
+  modesReccommended <- modesUnique %>% filter(modesUnique$modality %in% probs3)
+      
+  print('Your top choices for your recommended massage modalities based on your user input are: ')
+  
+  print(probs3)
+  cat('\n\n')
+  print(probs3[1])
+  print('Your first recommended massage modality description: ')
+  print(modesReccommended[1,2])
+  cat('\n')
+  print('Your first recommended massage modality benefits: ')
+  print(modesReccommended[1,3])
+  cat('\n')
+  print('Your first recommended massage modality possible side effects: ')
+  print(modesReccommended[1,4])
+  cat('\n\n')
+  
+  print(probs3[2])
+  print('Your second recommended massage modality description: ')
+  print(modesReccommended[2,2])
+  cat('\n')
+  print('Your second recommended massage modality benefits: ')
+  print(modesReccommended[2,3])
+  cat('\n')
+  print('Your second recommended massage modality possible side effects: ')
+  print(modesReccommended[2,4])
+  cat('\n\n')
+
+  print(probs3[3])
+  print('Your third recommended massage modality description: ')
+  print(modesReccommended[3,2])
+  cat('\n')
+  print('Your third recommended massage modality benefits: ')
+  print(modesReccommended[3,3])
+  cat('\n')
+  print('Your third recommended massage modality possible side effects: ')
+  print(modesReccommended[3,4])
+
+}
+
+```
+
+
+```{r}
+input1
+massageModalityRecommender2(input1)
+
+
+```
+
+```{r}
+input2
+massageModalityRecommender2(input2)
+```
+
+```{r}
+input3
+massageModalityRecommender2(input3)
+```
+***
+
+
+# TensorFlow Keras for Deep Neural Network predictions
+
+This next script uses the TensorFlow experimental contributor Keras package to build a deep neural network on the lemmatized okens of the benefits and contraindications to predict the modality of the massage, and got up to 100% accuracy. Keras is the simplified version of TensorFlow, that is super fast because it parallelizes the process, but also can be used with Graphical Processing Units if set up accordingly. No worries, because the following is not dependend on the GPUs. It uses your computer's CPUs. I took this template model from the demonstration of Chapter 13 of 'Python Machine Learning-Second Edition' by Sebastian Raschka and Vahid Mirjalili Kindle version. We used this course book in my Machine Learning Graduate course in Fall 2019, and this code works for python 3 as is. No issues and that is saying something-- because actually there were some minor issues, the mapping of the one hot encoding wasn't interpretable for my data, but everything worked perfect for this book's provided data of the ubiquitous MNIST data set. Buy it, rent it, github the Jupyter notebooks, and so on. 
+
+Aside: I was binge watching a teen show about idiot surfers the whole time who go lost treasure hunting and dig themselves holes the whole story, and had many opportunities to save themselves if they weren't idiot teenage surfers who have to go looking for trouble by petty actions, but anyhow. Another great binge, because the writers have to be so smart to dumb down their minds to that of someone so clueless and write non-stop drama. But anyways, that was how I felt looking through this simple code to overlay or use as a wrapper for my own data, and it was worth it. 
+
+Check this out!
+
+Reload these packages to use Python in R, if you are just jumping to this section.
+```{r}
+library(reticulate)
+```
+
+```{r}
+conda_list(conda = "auto") 
+
+```
+
+
+```{r}
+use_condaenv(condaenv = "python36")
+
+```
+
+```{python}
+import numpy as np
+import pandas as pd
+
+```
+
+
+```{python}
+data = pd.read_csv('lemmNgramsBenefits2Contraindications3.csv', encoding='unicode_escape')
+
+```
+
+
+```{python}
+data.shape
+
+```
+
+
+```{python}
+data.head()
+
+```
+
+
+```{python}
+np.random.seed(123)
+data0 = data.reindex(np.random.permutation(data.index))
+
+```
+
+
+```{python}
+data1 = data0.iloc[:,3:]
+
+```
+
+
+```{python}
+data1.shape
+
+```
+
+
+```{python}
+target=data0.iloc[:,0:1]
+
+```
+
+
+```{python}
+target.shape
+
+```
+
+
+```{python}
+print(target['modality'].unique())
+print(len(target['modality'].unique()))
+
+```
+
+
+```{python}
+mean_vals = np.mean(data1, axis=0)
+std_val = np.std(data1)
+
+data1_centered = (data1 - mean_vals)/std_val
+
+print(data1_centered.shape, target.shape)
+
+```
+
+
+```{python}
+print(data1.head())
+
+```
+
+
+```{python}
+print(target.head())
+
+```
+
+
+```{python}
+#numpy function
+
+class_mapping = {label: idx for idx, label in enumerate(np.unique(target['modality']))}
+class_mapping
+
+```
+
+
+```{python}
+target['mode']=target['modality']
+target['modality'] = target['modality'].map(class_mapping)
+target.head()
+
+```
+
+
+```{python}
+target1 = target['modality']
+target1.head()
+
+```
+
+
+```{python}
+X_train = data1[:365]
+X_test = data1[365:]
+y_train = target1[:365]
+y_test = target1[365:]
+
+################################
+# for adding the names of the classes after prediction from earlier in script
+y_trainNames = target['mode']
+y_trainNames = y_trainNames[:365]
+y_trainNames.columns=['mode']
+y_trainNames1=pd.DataFrame(y_trainNames)
+
+y_testNames = target['mode']
+y_testNames = y_testNames[365:]
+y_testNames.columns=['mode']
+y_testNames1=pd.DataFrame(y_testNames)
+################################
+
+print(X_train.shape)
+print(y_train.shape)
+print(X_test.shape)
+print(y_test.shape)
+
+```
+
+
+```{python}
+y_train
+
+```
+
+
+```{python}
+import tensorflow as tf
+import tensorflow.contrib.keras as keras
+#optionally use import tensorflow.keras as keras when no longer experimental contributor package development
+
+np.random.seed(123)
+tf.set_random_seed(123)
+
+```
+
+
+```{python}
+model = keras.models.Sequential()
+
+model.add(
+    keras.layers.Dense(
+        units=150,   #output units need to match next layer inputs 
+        input_dim=542, #number of features for input
+        kernel_initializer='glorot_uniform',# name of the guy behind Xavier Initialization; the biases to zero
+        bias_initializer='zeros',
+        activation='tanh'))
+
+model.add(
+    keras.layers.Dense(
+        units=150,   #output matches next layer input 
+        input_dim=150, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='tanh'))
+
+model.add(
+    keras.layers.Dense(
+        units=19,  #these are the number of class categories in our target  
+        input_dim=150,
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='softmax'))#will return the class membership probs summing to 1 of all class probs
+
+# these are hyperparameters that can be tuned if overfitting during training, or to get better accuracy
+sgd_optimizer = keras.optimizers.SGD( 
+        lr=0.001, decay=1e-7, momentum=.9)
+
+# categorical_crossentropy is used in multiclass classification instead of binary_crossentropy
+# to match the softmax function
+model.compile(optimizer=sgd_optimizer,
+              loss='sparse_categorical_crossentropy')
+# it was 'categorical_crossentropy', but that expects binary matrices of 1s and 0s
+# it said to use sparse_categorical_crossentropy
+
+```
+
+
+```{python}
+history = model.fit(X_train, y_train,
+                    batch_size=64, epochs=50,
+                    verbose=1, #setting verbose=1 will allow us to see the training and stop to tune parameters if needed
+                    validation_split=0.1) # this takes 10% of the training set held out for testing/validation at each epoch
+
+```
+
+A note on the above, it was very fast, faster than the time to load in the previous python modules the model uses. This is because that rediscovered paper on backpropagation for matriceXvector multiplication from 1982-1986, two different sources and different versions, was rediscovered, and found to solve a lot of computation. The way that the neural networks work is with an activation layer that is linear, then applying some non-linear activations functions to a hidden layer, and more layers with other mixes or variations as to what type of non-linear function it is. They are all versions to some extent of the logistic or sigmoid activation function. Mainly the hyperbolic tangent and a rectified liner unit, and the softmax function to add to the logistic function to present meaningful class membership probabilities to classification, unlike the logistic function that provided class probabilities on each class with the max being chosen but with all class probabilities not summing to 1. I know it is jibberish above if your are a grammatic and spelling fanatic. But that was a generalization of how NNs work and I myself found it initially confusing, until I actually wrote the notes on the NNs and tested it out myself. Keep in mind the kindle version is not the best version to get, especially for coding, because of the placement and white spacing, but this book and many others do usually provide the code in a separate free sourced link to run the demos yourself.
+
+As an aside, if you ever watched the trailers or partial trailers to the movie from the early 2000s called the Caterpillar, this is what is similar to NNs. In fact it could be that some nerd, was locked up in their room going over papers, and thinking of their own dissertation or working in a department with some link in interviewed, interned, contract colleagues, etc. that casually passed on the information of how similar the caterpillar movie is to the way NNs work. Because you have to take in input dimension units as the number of features in the training set, then as the outputs, declare some number of units or pieces (demented not dimensioned) and you then put those same units into the first hidden layer that matches the number of input units of the number of outputs of the previous layer, and so on.. until the last hidden layer you have down size into the number of classes, so that the number of output units on the last hidden layer equals the number of classes, and this is where you set 'None' in TensorFlow, or you use Keras and select the softmax activation to give class membership probabilities that are meaningful (sum to 1). There is more that goes into building NNs, and not every format works for what you have to feed in, but manipulating the data types could fix the problem. I never watched the Caterpillar, I assumed from the partial trailer watched that this is what happened, and I never plan on watching it.
+```{python}
+y_train_pred = model.predict_classes(X_train, verbose=0)
+print('First 3 predictions: ', y_train_pred[:3])
+
+```
+
+
+```{python}
+y_train_pred = model.predict_classes(X_train, 
+                                     verbose=0)
+
+```
+
+
+```{python}
+y_train_pred1 = pd.DataFrame(y_train_pred)
+y_train_pred1.columns=['predicted']
+
+y_train1 = y_train
+y_train1.columns=['modality']
+y_train1 = pd.DataFrame(y_train1)
+y_train_pred1.index=y_train1.index
+
+Train=pd.concat([y_train1['modality'],y_trainNames1['mode'],y_train_pred1['predicted']],axis=1)
+
+print(Train)
+
+```
+
+
+```{python}
+y_test_pred = model.predict_classes(X_test, 
+                                    verbose=0)
+
+```
+
+
+```{python}
+y_test_pred1 = pd.DataFrame(y_test_pred)
+y_test_pred1.columns=['predicted']
+
+y_test1 = y_test
+y_test1.columns=['modality']
+y_test1 = pd.DataFrame(y_test1)
+y_test_pred1.index=y_test1.index
+
+Test=pd.concat([y_test1['modality'],y_testNames1['mode'],y_test_pred1['predicted']],axis=1)
+
+print(Test)
+
+```
+
+
+```{python}
+s = sum(Train['modality']==Train['predicted'])
+l = len(Train['modality'])
+accTrain = s/l
+print('Training Correctly Predicted:',s,'Training Accuracy:',accTrain,'\n')
+
+```
+
+
+```{python}
+s = sum(Test['modality']==Test['predicted'])
+l = len(Test['modality'])
+accTest = s/l
+print('Testing Correctly Predicted:',s,'Testing Accuracy:',accTest)
+
+```
+
+
+Keep in mind, this uses the lemmatized tokens from the benefits and contraindications to predict the modality. All the tokens are the same for each modality. We uses Random Forest and Gradient Boosted Trees at the beginning of this script with the same results. As they should be, because every sample is a duplicate only within each unique modality of massage for this recommender system.
+
+[Results Random Forest](#results-random-forest)
+[Results Gradient Boosted Trees](#results-gradient-boosted-trees)
+
+But the model fitting and validation was much faster for NNs, and the code was much less lines for the Random Forest and Gradient Boosted trees.
+
+It would be useful to see how this works on the healthcare and wellness descriptions to see if the right class could be predicted.
+
+
+***
+
+
+Lets look at the table of health and wellness modalities based on the cleaned up reviews from a social media site. I took only the columns I might be interested in and saved it as 'userReviewBusinessTypeRatig.csv'. We will need to tokenize the words and put them into the same format that will run predictions on the ratings based on the tokenized reviews. 

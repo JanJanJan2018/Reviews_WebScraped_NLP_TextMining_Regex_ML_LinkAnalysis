@@ -1,0 +1,524 @@
+---
+title: "Yelp Reviews revisited with Ngram Tokenized DNNs"
+author: "Janis Corona"
+date: "5/4/2020"
+output: html_document
+---
+
+Lets look at the table of Reviews from four businesses made up of a high end spa, a low cost grocery store, and two different chiropractors' offices in or around Corona, CA.  This is based on the cleaned up reviews of these businesses from a social media site where cleaned up just means filtering out business ads, the date, the user photos, user rating, etc. from the header of each review. Only the columns that were needed were used and saved as 'userReviewBusinessTypeRatig.csv'. 
+This script version is the 2nd that omits the part where We tokenized the words and put them into the same format that will run predictions on the ratings based on the tokenized reviews.These reviews are rated on a scale of 1 through 5, with 5 being the best experience and 1 the worst experience.
+
+This version omits the Random Forest and Gradient Boosted Tree models and the 1st and 2nd DNN models in TensorFlow's Keras module. It further expands on models 1 and 2 with tuning the various hyperparameters for prediction on the testing set and validating on the training set in training.
+
+- [Deep Neural Nets: Model 3](#dnn-model3)
+- [DNN Model3 results](#dnn-model3-results)
+
+- [Deep Neural Nets: Model 4](#dnn-model4)
+- [DNN Model4 results](#dnn-model3-results)
+
+- [Deep Neural Nets: Model 5](#dnn-model5)
+- [DNN Model5 results](#dnn-model3-results)
+
+```{r}
+library(reticulate)
+```
+
+```{r}
+conda_list(conda = "auto") 
+
+```
+
+
+```{r}
+use_condaenv(condaenv = "python36")
+
+```
+
+
+# Deep Neural Net Models
+
+
+```{python}
+import numpy as np
+import pandas as pd
+
+```
+
+
+# Data Normalization and Splits
+```{python}
+data = pd.read_csv('lemm123gramsHealthWellness.csv', encoding='unicode_escape')
+
+```
+
+
+```{python}
+data.shape
+
+```
+
+
+```{python}
+data.head()
+
+```
+
+
+```{python}
+np.random.seed(123)
+data0 = data.reindex(np.random.permutation(data.index))
+
+```
+
+
+```{python}
+data1 = data0.iloc[:,3:]
+
+```
+
+
+```{python}
+data1.shape
+
+```
+
+
+```{python}
+target=data0.iloc[:,0:1]
+
+```
+
+
+```{python}
+target.shape
+
+```
+
+
+```{python}
+print(target['Rating'].unique())
+print(len(target['Rating'].unique()))
+
+```
+
+
+```{python}
+mean_vals = np.mean(data1, axis=0)
+std_val = np.std(data1)
+
+data1_centered = (data1 - mean_vals)/std_val
+
+print(data1_centered.shape, target.shape)
+
+```
+
+
+```{python}
+print(data1.head())
+
+```
+
+
+```{python}
+print(target.head())
+
+```
+
+These values for rating are already integer, so this next step and the one that follows isn't needed, but we could just run it anyways.
+```{python}
+#numpy function
+
+class_mapping = {label: idx for idx, label in enumerate(np.unique(target['Rating']))}
+class_mapping
+
+```
+
+The mapping mapped ratings 1-5 into 0:4 values.
+```{python}
+target['OH_rating']=target['Rating']
+target['OH_rating'] = target['Rating'].map(class_mapping)
+target.head()
+
+```
+
+
+```{python}
+target1 = target['OH_rating']
+target1.head()
+
+```
+
+Testing split on data with permutated indices. There are 614 instances in this data, 20% is about 123, and 80% is about 491 instances.
+```{python}
+X_train = data1[:491]
+X_test = data1[491:]
+y_train = target1[:491]
+y_test = target1[491:]
+
+################################
+# for adding the names of the classes after prediction from earlier in script
+y_trainNames = target['Rating']
+y_trainNames = y_trainNames[:491]
+y_trainNames.columns=['Rating']
+y_trainNames1=pd.DataFrame(y_trainNames)
+
+y_testNames = target['Rating']
+y_testNames = y_testNames[491:]
+y_testNames.columns=['Rating']
+y_testNames1=pd.DataFrame(y_testNames)
+################################
+
+print(X_train.shape)
+print(y_train.shape)
+print(X_test.shape)
+print(y_test.shape)
+```
+
+
+```{python}
+y_train
+
+```
+
+
+```{python}
+import tensorflow as tf
+import tensorflow.contrib.keras as keras
+#optionally use import tensorflow.keras as keras when no longer experimental contributor package development
+
+np.random.seed(123)
+tf.set_random_seed(123)
+
+```
+
+
+
+# DNN Model3
+```{python}
+model3 = keras.models.Sequential()
+
+model3.add(
+    keras.layers.Dense(
+        units=400,   #output units need to match next layer inputs 
+        input_dim=52611, #number of features for input above says 52611
+        kernel_initializer='glorot_uniform',# name of the guy behind Xavier Initialization; the biases to zero
+        bias_initializer='zeros',
+        activation='tanh'))
+
+model3.add(
+    keras.layers.Dense(
+        units=750,   #output matches next layer input 
+        input_dim=400, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='relu'))
+
+model3.add(
+    keras.layers.Dense(
+        units=800,   #output matches next layer input 
+        input_dim=750, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='tanh'))
+
+
+model3.add(
+    keras.layers.Dense(
+        units=750,   #output matches next layer input 
+        input_dim=800, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='relu'))
+
+
+model3.add(
+    keras.layers.Dense(
+        units=400,   #output matches next layer input 
+        input_dim=750, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='tanh'))
+
+
+model3.add(
+    keras.layers.Dense(
+        units=300,   #output matches next layer input 
+        input_dim=400, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='relu'))
+
+
+model3.add(
+    keras.layers.Dense(
+        units=19,  #these are the number of class categories in our target  
+        input_dim=300,
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='softmax'))#will return the class membership probs summing to 1 of all class probs
+
+# these are hyperparameters that can be tuned if overfitting during training, or to get better accuracy
+sgd_optimizer = keras.optimizers.SGD( 
+        lr=0.01, decay=1e-7, momentum=.9)
+
+# categorical_crossentropy is used in multiclass classification instead of binary_crossentropy
+# to match the softmax function
+model3.compile(optimizer=sgd_optimizer,
+              loss='sparse_categorical_crossentropy')
+# it was 'categorical_crossentropy', but that expects binary matrices of 1s and 0s
+# it said to use sparse_categorical_crossentropy
+
+```
+
+There are a lot of layers and units in each, so I am reducing the number of iterations and increasing the batch size.
+```{python}
+history3 = model3.fit(X_train, y_train,
+                    batch_size=70, epochs=5,
+                    verbose=1, 
+                    validation_split=0.1) 
+
+```
+
+```{python}
+y_train_pred3 = model3.predict_classes(X_train, verbose=0)
+print('First 3 predictions: ', y_train_pred3[:3])
+
+```
+
+```{python}
+y_train_pred3 = model3.predict_classes(X_train, 
+                                     verbose=0)
+
+```
+
+```{python}
+y_train_pred3 = pd.DataFrame(y_train_pred3)
+y_train_pred3.columns=['predicted']
+
+y_train3 = y_train
+y_train3 = pd.DataFrame(y_train3)
+y_train3.columns=['OH_Rating']
+
+y_train_pred3.index=y_train3.index
+
+Train3=pd.concat([y_train3['OH_Rating'],y_trainNames1['Rating'],y_train_pred2['predicted']],axis=1)
+
+print(Train3)
+
+```
+The true rating is the ratings on a different scale, because we chose to use the mapping that was designed for categorical values having string factor names instead of integer digits. 
+
+```{python}
+y_test_pred3 = model3.predict_classes(X_test, 
+                                    verbose=0)
+
+```
+
+```{python}
+y_test_pred3 = pd.DataFrame(y_test_pred3)
+y_test_pred3.columns=['predicted']
+
+y_test3 = y_test
+y_test3 = pd.DataFrame(y_test3)
+y_test3.columns=['OH_Rating']
+
+y_test_pred3.index=y_test3.index
+
+Test3=pd.concat([y_test3['OH_Rating'],y_testNames1['Rating'],y_test_pred3['predicted']],axis=1)
+
+print(Test3)
+
+```
+
+# DNN Model3 Results 
+```{python}
+s = sum(Train3['OH_Rating']==Train3['predicted'])
+l = len(Train3['Rating'])
+accTrain3 = s/l
+print('Training Correctly Predicted:',s,'Training Accuracy:',accTrain3,'\n')
+
+```
+Thats pretty good accuracy on these very mixed ratings from various business models.
+
+```{python}
+s = sum(Test3['OH_Rating']==Test3['predicted'])
+l = len(Test3['OH_Rating'])
+accTest3 = s/l
+print('Testing Correctly Predicted:',s,'Testing Accuracy:',accTest3)
+
+```
+
+This last one didn't take much time to run because of the much lower number of epochs, but was worse than the last two models for testing accuracy and one of the better models on training validation.
+
+
+
+
+
+
+# DNN Model4
+```{python}
+model4 = keras.models.Sequential()
+
+model4.add(
+    keras.layers.Dense(
+        units=2000,   #output units need to match next layer inputs 
+        input_dim=52611, #number of features for input above says 52611
+        kernel_initializer='glorot_uniform',# name of the guy behind Xavier Initialization; the biases to zero
+        bias_initializer='zeros',
+        activation='tanh'))
+
+model4.add(
+    keras.layers.Dense(
+        units=1200,   #output matches next layer input 
+        input_dim=2000, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='relu'))
+
+model4.add(
+    keras.layers.Dense(
+        units=1800,   #output matches next layer input 
+        input_dim=1200, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='tanh'))
+
+
+model4.add(
+    keras.layers.Dense(
+        units=750,   #output matches next layer input 
+        input_dim=1800, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='relu'))
+
+
+model4.add(
+    keras.layers.Dense(
+        units=1400,   #output matches next layer input 
+        input_dim=750, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='tanh'))
+
+
+model4.add(
+    keras.layers.Dense(
+        units=300,   #output matches next layer input 
+        input_dim=1400, #input matches last layer's output
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='relu'))
+
+
+model4.add(
+    keras.layers.Dense(
+        units=19,  #these are the number of class categories in our target  
+        input_dim=300,
+        kernel_initializer='glorot_uniform',
+        bias_initializer='zeros',
+        activation='softmax'))#will return the class membership probs summing to 1 of all class probs
+
+# these are hyperparameters that can be tuned if overfitting during training, or to get better accuracy
+sgd_optimizer = keras.optimizers.SGD( 
+        lr=0.01, decay=1e-7, momentum=.9)
+
+# categorical_crossentropy is used in multiclass classification instead of binary_crossentropy
+# to match the softmax function
+model4.compile(optimizer=sgd_optimizer,
+              loss='sparse_categorical_crossentropy')
+# it was 'categorical_crossentropy', but that expects binary matrices of 1s and 0s
+# it said to use sparse_categorical_crossentropy
+
+```
+
+
+
+```{python}
+history4 = model4.fit(X_train, y_train,
+                    batch_size=50, epochs=5,
+                    verbose=1, 
+                    validation_split=0.1) 
+
+```
+
+```{python}
+y_train_pred4 = model4.predict_classes(X_train, verbose=0)
+print('First 3 predictions: ', y_train_pred4[:3])
+
+```
+
+```{python}
+y_train_pred4 = model4.predict_classes(X_train, 
+                                     verbose=0)
+
+```
+
+```{python}
+y_train_pred4 = pd.DataFrame(y_train_pred4)
+y_train_pred4.columns=['predicted']
+
+y_train4 = y_train
+y_train4 = pd.DataFrame(y_train4)
+y_train4.columns=['OH_Rating']
+
+y_train_pred4.index=y_train4.index
+
+Train4=pd.concat([y_train4['OH_Rating'],y_trainNames1['Rating'],y_train_pred4['predicted']],axis=1)
+
+print(Train4)
+
+```
+The true rating is the ratings on a different scale, because we chose to use the mapping that was designed for categorical values having string factor names instead of integer digits. 
+
+```{python}
+y_test_pred4 = model4.predict_classes(X_test, 
+                                    verbose=0)
+
+```
+
+```{python}
+y_test_pred4 = pd.DataFrame(y_test_pred4)
+y_test_pred4.columns=['predicted']
+
+y_test4 = y_test
+y_test4 = pd.DataFrame(y_test4)
+y_test4.columns=['OH_Rating']
+
+y_test_pred4.index=y_test4.index
+
+Test4=pd.concat([y_test4['OH_Rating'],y_testNames1['Rating'],y_test_pred4['predicted']],axis=1)
+
+print(Test4)
+
+```
+
+# DNN Model4 Results 
+```{python}
+s = sum(Train4['OH_Rating']==Train4['predicted'])
+l = len(Train4['Rating'])
+accTrain4 = s/l
+print('Training Correctly Predicted:',s,'Training Accuracy:',accTrain4,'\n')
+
+```
+Thats pretty good accuracy on these very mixed ratings from various business models.
+
+```{python}
+s = sum(Test4['OH_Rating']==Test4['predicted'])
+l = len(Test4['OH_Rating'])
+accTest4 = s/l
+print('Testing Correctly Predicted:',s,'Testing Accuracy:',accTest4)
+
+```
+
+This last model had a change in batch size and increased units compared to model3 that had increased layers and batchsize with reduced epochs compared to model2.
+
+***
+
+
+
+
+As a note the ReLU function solves the vanishing gradient problem that the sigmoid and tanh activation functions can find, so maybe using more ReLU activation layers in our hidden layers of our DNN model will have a better outcome. Also, note that the tanh is better on backpropagation and has a broader range of values than the sigmoid or logistic function. We didn't use any sigmoid activation layers, but the softmax is a type of sigmoid function that returns meaningful probabilities per class instead of the sigmoid and was used in the last output layer of all DNN models for that reason.
+
+
+
